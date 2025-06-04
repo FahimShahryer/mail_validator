@@ -1,0 +1,26 @@
+# Ignore all directories
+*/
+
+# But allow specific files in the root directory
+!*.py
+
+# Still ignore the virtual environment
+.venv/
+
+# Ignore common files and folders
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VS Code settings
+.vscode/
+
+# Logs and environment variables
+*.log
+.env
+*.env
+
+# Jupyter and testing caches
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
