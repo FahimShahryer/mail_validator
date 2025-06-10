@@ -535,8 +535,8 @@ def render_single_entry_tab(api_key: str):
 # Main Streamlit App
 def main():
     # Header
-    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
+    # st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
+    # st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
     
     # Sidebar for API key
     with st.sidebar:
