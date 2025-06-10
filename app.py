@@ -533,13 +533,71 @@ def render_single_entry_tab(api_key: str):
                 st.error("❌ Invalid company URL provided. Please check the URL format.")
 
 
-# Add this function after your existing email verification functions
+# REPLACE the previous LinkedIn finder functions with these updated ones:
+
+def extract_domain_from_email(email_or_url: str) -> str:
+    """Extracts domain from email address or cleans URL."""
+    if not isinstance(email_or_url, str) or not email_or_url.strip():
+        return ""
+    
+    email_or_url = email_or_url.strip()
+    
+    # Check if it's an email address
+    if '@' in email_or_url:
+        # Extract domain from email
+        domain = email_or_url.split('@')[1]
+        return domain.lower()
+    else:
+        # It's a URL/domain, clean it normally
+        return clean_domain(email_or_url)
+
+def lookup_person_linkedin_rocketreach(email: str, rocketreach_api_key: str) -> dict:
+    """Calls RocketReach API to find person's LinkedIn profile from email."""
+    # RocketReach Person Lookup API
+    api_url = "https://api.rocketreach.co/v2/api/person/lookup"
+    
+    headers = {
+        "Api-Key": rocketreach_api_key,
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "email": email.strip()
+    }
+    
+    try:
+        response = requests.get(api_url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("status") == "success":
+            person_data = data.get("person", {})
+            linkedin_url = person_data.get("linkedin_url", "")
+            
+            return {
+                "status": "success",
+                "type": "person",
+                "name": person_data.get("name", ""),
+                "email": email,
+                "linkedin_url": linkedin_url,
+                "title": person_data.get("current_title", ""),
+                "company": person_data.get("current_employer", ""),
+                "location": person_data.get("location", ""),
+                "phone": person_data.get("phone", "")
+            }
+        else:
+            return {"error": f"Person API Error: {data.get('message', 'Person not found')}"}
+            
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Person API Request Failed: {e}"}
+    except json.JSONDecodeError:
+        return {"error": "Failed to decode Person API response"}
 
 def lookup_company_linkedin_rocketreach(company_url: str, rocketreach_api_key: str) -> dict:
     """Calls RocketReach API to find company LinkedIn profile."""
-    domain = clean_domain(company_url)
+    domain = extract_domain_from_email(company_url)  # Updated to handle emails
     if not domain:
-        return {"error": "Invalid company URL"}
+        return {"error": "Invalid company URL or email"}
     
     # RocketReach Company Lookup API
     api_url = "https://api.rocketreach.co/v2/api/company/lookup"
@@ -564,6 +622,7 @@ def lookup_company_linkedin_rocketreach(company_url: str, rocketreach_api_key: s
             
             return {
                 "status": "success",
+                "type": "company",
                 "company_name": company_data.get("name", ""),
                 "domain": domain,
                 "linkedin_url": linkedin_url,
@@ -575,15 +634,172 @@ def lookup_company_linkedin_rocketreach(company_url: str, rocketreach_api_key: s
                 "founded": company_data.get("founded", "")
             }
         else:
-            return {"error": f"API Error: {data.get('message', 'Unknown error')}"}
+            return {"error": f"Company API Error: {data.get('message', 'Company not found')}"}
             
     except requests.exceptions.RequestException as e:
-        return {"error": f"API Request Failed: {e}"}
+        return {"error": f"Company API Request Failed: {e}"}
     except json.JSONDecodeError:
-        return {"error": "Failed to decode API response"}
-
+        return {"error": "Failed to decode Company API response"}
 
 def render_linkedin_finder_tab(rocketreach_api_key: str):
+    """Renders the LinkedIn profile finder tab content."""
+    st.subheader("🔗 LinkedIn Profile Finder")
+    
+    # Instructions
+    st.info("💡 **Enter either:**\n- 📧 **Email address** (e.g., john@company.com) → Find person's LinkedIn\n- 🌐 **Company URL** (e.g., company.com) → Find company's LinkedIn")
+    
+    # Single entry form
+    with st.container():
+        input_value = st.text_input(
+            "Email Address or Company URL",
+            placeholder="e.g., person@company.com OR company.com",
+            help="Enter an email address to find person's LinkedIn, or company URL to find company LinkedIn"
+        )
+        
+        # Find LinkedIn button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            find_linkedin_btn = st.button(
+                "🔍 Find LinkedIn Profile", 
+                type="primary",
+                use_container_width=True,
+                key="linkedin_finder"
+            )
+    
+    # Processing logic
+    if find_linkedin_btn:
+        if not input_value:
+            st.error("❌ Please enter an email address or company URL")
+            return
+        
+        input_clean = input_value.strip()
+        
+        # Determine if it's an email or URL
+        is_email = '@' in input_clean
+        
+        # Show processing
+        search_type = "person's LinkedIn profile" if is_email else "company LinkedIn profile"
+        with st.spinner(f"🔍 Searching for {search_type}..."):
+            if is_email:
+                result = lookup_person_linkedin_rocketreach(input_clean, rocketreach_api_key)
+            else:
+                result = lookup_company_linkedin_rocketreach(input_clean, rocketreach_api_key)
+            
+        # Display results
+        st.subheader("🎯 Search Results")
+        
+        if result.get("status") == "success":
+            linkedin_url = result.get("linkedin_url", "")
+            
+            if linkedin_url:
+                # LinkedIn found
+                profile_type = "Person" if result.get("type") == "person" else "Company"
+                st.markdown(f"""
+                <div class="email-found">
+                    ✅ {profile_type} LinkedIn Profile Found!<br>
+                    🔗 <a href="{linkedin_url}" target="_blank" style="color: white; text-decoration: underline;">{linkedin_url}</a>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Display different info based on type
+                if result.get("type") == "person":
+                    # Person details
+                    st.markdown(f"""
+                    <div class="result-card">
+                        <h3>👤 Person Information</h3>
+                        <p><strong>👤 Name:</strong> {result.get('name', 'N/A')}</p>
+                        <p><strong>📧 Email:</strong> {result.get('email', 'N/A')}</p>
+                        <p><strong>🔗 LinkedIn:</strong> <a href="{linkedin_url}" target="_blank" style="color: white;">{linkedin_url}</a></p>
+                        <p><strong>💼 Title:</strong> {result.get('title', 'N/A')}</p>
+                        <p><strong>🏢 Company:</strong> {result.get('company', 'N/A')}</p>
+                        <p><strong>📍 Location:</strong> {result.get('location', 'N/A')}</p>
+                        <p><strong>📞 Phone:</strong> {result.get('phone', 'N/A')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Download person result
+                    result_df = pd.DataFrame([{
+                        'name': result.get('name', ''),
+                        'email': result.get('email', ''),
+                        'linkedin_url': linkedin_url,
+                        'title': result.get('title', ''),
+                        'company': result.get('company', ''),
+                        'location': result.get('location', ''),
+                        'phone': result.get('phone', '')
+                    }])
+                    
+                else:
+                    # Company details
+                    st.markdown(f"""
+                    <div class="result-card">
+                        <h3>🏢 Company Information</h3>
+                        <p><strong>🏷️ Company Name:</strong> {result.get('company_name', 'N/A')}</p>
+                        <p><strong>🌐 Domain:</strong> {result.get('domain', 'N/A')}</p>
+                        <p><strong>🔗 LinkedIn:</strong> <a href="{linkedin_url}" target="_blank" style="color: white;">{linkedin_url}</a></p>
+                        <p><strong>🏭 Industry:</strong> {result.get('industry', 'N/A')}</p>
+                        <p><strong>👥 Company Size:</strong> {result.get('size', 'N/A')}</p>
+                        <p><strong>📍 Location:</strong> {result.get('location', 'N/A')}</p>
+                        <p><strong>📅 Founded:</strong> {result.get('founded', 'N/A')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Company description
+                    if result.get('description'):
+                        with st.expander("📋 Company Description"):
+                            st.write(result.get('description'))
+                    
+                    # Download company result
+                    result_df = pd.DataFrame([{
+                        'company_name': result.get('company_name', ''),
+                        'domain': result.get('domain', ''),
+                        'linkedin_url': linkedin_url,
+                        'industry': result.get('industry', ''),
+                        'size': result.get('size', ''),
+                        'location': result.get('location', ''),
+                        'founded': result.get('founded', ''),
+                        'website': result.get('website', '')
+                    }])
+                
+                # Download button
+                csv_buffer = io.StringIO()
+                result_df.to_csv(csv_buffer, index=False)
+                csv_data = csv_buffer.getvalue()
+                
+                filename_prefix = "person" if result.get("type") == "person" else "company"
+                st.download_button(
+                    label="📥 Download Result as CSV",
+                    data=csv_data,
+                    file_name=f"{filename_prefix}_linkedin_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    type="secondary"
+                )
+                
+            else:
+                # Found but no LinkedIn
+                entity_type = "Person" if result.get("type") == "person" else "Company"
+                entity_name = result.get('name') or result.get('company_name', 'Unknown')
+                st.markdown(f"""
+                <div class="email-not-found">
+                    ⚠️ {entity_type} Found, But No LinkedIn Profile<br>
+                    {entity_type}: {entity_name}
+                </div>
+                """, unsafe_allow_html=True)
+                
+        else:
+            # Error or not found
+            error_msg = result.get("error", "Not found in RocketReach database")
+            entity_type = "Person" if is_email else "Company"
+            st.markdown(f"""
+            <div class="email-not-found">
+                ❌ {entity_type} Not Found<br>
+                {error_msg}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if is_email:
+                st.info("💡 **Tips for email search:**\n- Make sure the email address is correct\n- Person might not be in RocketReach database\n- Try the company URL instead")
+            else:
+                st.info("💡 **Tips for company search:**\n- Make sure the company URL is correct\n- Try with just the domain (e.g., company.com)\n- Some companies might not be in RocketReach database")
     """Renders the LinkedIn profile finder tab content."""
     st.subheader("🔗 Company LinkedIn Finder")
     
