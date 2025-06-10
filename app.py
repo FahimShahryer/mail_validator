@@ -532,6 +532,184 @@ def render_single_entry_tab(api_key: str):
             else:
                 st.error("❌ Invalid company URL provided. Please check the URL format.")
 
+
+# Add this function after your existing email verification functions
+
+def lookup_company_linkedin_rocketreach(company_url: str, rocketreach_api_key: str) -> dict:
+    """Calls RocketReach API to find company LinkedIn profile."""
+    domain = clean_domain(company_url)
+    if not domain:
+        return {"error": "Invalid company URL"}
+    
+    # RocketReach Company Lookup API
+    api_url = "https://api.rocketreach.co/v2/api/company/lookup"
+    
+    headers = {
+        "Api-Key": rocketreach_api_key,
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "domain": domain
+    }
+    
+    try:
+        response = requests.get(api_url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("status") == "success":
+            company_data = data.get("company", {})
+            linkedin_url = company_data.get("linkedin_url", "")
+            
+            return {
+                "status": "success",
+                "company_name": company_data.get("name", ""),
+                "domain": domain,
+                "linkedin_url": linkedin_url,
+                "description": company_data.get("description", ""),
+                "industry": company_data.get("industry", ""),
+                "size": company_data.get("size", ""),
+                "location": company_data.get("location", ""),
+                "website": company_data.get("website", ""),
+                "founded": company_data.get("founded", "")
+            }
+        else:
+            return {"error": f"API Error: {data.get('message', 'Unknown error')}"}
+            
+    except requests.exceptions.RequestException as e:
+        return {"error": f"API Request Failed: {e}"}
+    except json.JSONDecodeError:
+        return {"error": "Failed to decode API response"}
+
+
+def render_linkedin_finder_tab(rocketreach_api_key: str):
+    """Renders the LinkedIn profile finder tab content."""
+    st.subheader("🔗 Company LinkedIn Finder")
+    
+    # Single entry form
+    with st.container():
+        company_url = st.text_input(
+            "Company URL",
+            placeholder="e.g., https://company.com or company.com",
+            help="Enter the company website URL to find their LinkedIn profile"
+        )
+        
+        # Find LinkedIn button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            find_linkedin_btn = st.button(
+                "🔍 Find LinkedIn Profile", 
+                type="primary",
+                use_container_width=True,
+                key="linkedin_finder"
+            )
+    
+    # Processing logic
+    if find_linkedin_btn:
+        if not company_url:
+            st.error("❌ Please enter a company URL")
+            return
+        
+        # Show processing
+        with st.spinner("🔍 Searching for LinkedIn profile..."):
+            company_url_clean = company_url.strip()
+            result = lookup_company_linkedin_rocketreach(company_url_clean, rocketreach_api_key)
+            
+        # Display results
+        st.subheader("🎯 Search Results")
+        
+        if result.get("status") == "success":
+            linkedin_url = result.get("linkedin_url", "")
+            
+            if linkedin_url:
+                # LinkedIn found
+                st.markdown(f"""
+                <div class="email-found">
+                    ✅ LinkedIn Profile Found!<br>
+                    🔗 <a href="{linkedin_url}" target="_blank" style="color: white; text-decoration: underline;">{linkedin_url}</a>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Company details
+                st.markdown(f"""
+                <div class="result-card">
+                    <h3>🏢 Company Information</h3>
+                    <p><strong>🏷️ Company Name:</strong> {result.get('company_name', 'N/A')}</p>
+                    <p><strong>🌐 Domain:</strong> {result.get('domain', 'N/A')}</p>
+                    <p><strong>🔗 LinkedIn:</strong> <a href="{linkedin_url}" target="_blank" style="color: white;">{linkedin_url}</a></p>
+                    <p><strong>🏭 Industry:</strong> {result.get('industry', 'N/A')}</p>
+                    <p><strong>👥 Company Size:</strong> {result.get('size', 'N/A')}</p>
+                    <p><strong>📍 Location:</strong> {result.get('location', 'N/A')}</p>
+                    <p><strong>📅 Founded:</strong> {result.get('founded', 'N/A')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Description if available
+                if result.get('description'):
+                    with st.expander("📋 Company Description"):
+                        st.write(result.get('description'))
+                
+                # Download result
+                linkedin_result_df = pd.DataFrame([{
+                    'company_name': result.get('company_name', ''),
+                    'domain': result.get('domain', ''),
+                    'linkedin_url': linkedin_url,
+                    'industry': result.get('industry', ''),
+                    'size': result.get('size', ''),
+                    'location': result.get('location', ''),
+                    'founded': result.get('founded', ''),
+                    'website': result.get('website', '')
+                }])
+                
+                csv_buffer = io.StringIO()
+                linkedin_result_df.to_csv(csv_buffer, index=False)
+                csv_data = csv_buffer.getvalue()
+                
+                st.download_button(
+                    label="📥 Download Company Info as CSV",
+                    data=csv_data,
+                    file_name=f"company_linkedin_{clean_domain(company_url_clean)}_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    type="secondary"
+                )
+                
+            else:
+                # Company found but no LinkedIn
+                st.markdown(f"""
+                <div class="email-not-found">
+                    ⚠️ Company Found, But No LinkedIn Profile<br>
+                    Company: {result.get('company_name', 'Unknown')}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Show available company info
+                if result.get('company_name'):
+                    st.markdown(f"""
+                    <div class="result-card">
+                        <h3>🏢 Available Company Information</h3>
+                        <p><strong>🏷️ Company Name:</strong> {result.get('company_name', 'N/A')}</p>
+                        <p><strong>🌐 Domain:</strong> {result.get('domain', 'N/A')}</p>
+                        <p><strong>🏭 Industry:</strong> {result.get('industry', 'N/A')}</p>
+                        <p><strong>👥 Company Size:</strong> {result.get('size', 'N/A')}</p>
+                        <p><strong>📍 Location:</strong> {result.get('location', 'N/A')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+        else:
+            # Error or not found
+            error_msg = result.get("error", "Company not found")
+            st.markdown(f"""
+            <div class="email-not-found">
+                ❌ Company Not Found<br>
+                {error_msg}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.info("💡 **Tips:**\n- Make sure the company URL is correct\n- Try with just the domain (e.g., company.com)\n- Some companies might not be in RocketReach database")
+
+
+
 # Main Streamlit App
 def main():
     # Header
@@ -594,14 +772,27 @@ def main():
         st.warning("⚠️ Please enter your API key in the sidebar to continue.")
         return
     
-    # Tab structure
-    tab1, tab2 = st.tabs(["📁 CSV Upload", "👤 Single Entry"])
+    # Check if we need RocketReach API key for LinkedIn finder
+    rocketreach_key = st.sidebar.text_input(
+        "RocketReach API Key (for LinkedIn finder)",
+        type="password",
+        help="Enter your RocketReach API key for LinkedIn profile search"
+    )
+    
+    # Tab structure - ADD THE NEW TAB HERE
+    tab1, tab2, tab3 = st.tabs(["📁 CSV Upload", "👤 Single Entry", "🔗 LinkedIn Finder"])
     
     with tab1:
         render_csv_upload_tab(api_key)
     
     with tab2:
         render_single_entry_tab(api_key)
+    
+    with tab3:
+        if not rocketreach_key:
+            st.warning("⚠️ Please enter your RocketReach API key in the sidebar to use LinkedIn finder.")
+        else:
+            render_linkedin_finder_tab(rocketreach_key)
 
 if __name__ == "__main__":
     main()
