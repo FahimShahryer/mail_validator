@@ -1,2 +1,4 @@
 beautifulsoup4
 lxml
+googlesearch-python
+selenium
