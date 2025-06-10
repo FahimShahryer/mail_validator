@@ -80,10 +80,75 @@ st.markdown("""
         color: #17a2b8;
         font-weight: bold;
     }
+    
+    .result-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        margin: 1rem 0;
+    }
+    
+    .result-card h3 {
+        margin: 0 0 1rem 0;
+        font-size: 1.5rem;
+    }
+    
+    .result-card p {
+        margin: 0.5rem 0;
+        font-size: 1.1rem;
+    }
+    
+    .single-entry-form {
+        background: #f8f9ff;
+        padding: 2rem;
+        border-radius: 15px;
+        border: 1px solid #e0e6ff;
+        margin: 1rem 0;
+    }
+    
+    .email-found {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        text-align: center;
+        margin: 1rem 0;
+        font-size: 1.2rem;
+        font-weight: bold;
+    }
+    
+    .email-not-found {
+        background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        text-align: center;
+        margin: 1rem 0;
+        font-size: 1.2rem;
+        font-weight: bold;
+    }
+    
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 10px 10px 0 0;
+        padding: 1rem 2rem;
+        font-weight: bold;
+    }
+    
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(90deg, #764ba2 0%, #667eea 100%);
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Core email verification functions (adapted from original code)
+# Core email verification functions (same as before)
 def clean_domain(domain_raw: str) -> str:
     """Removes http(s)://, www., and trailing slashes."""
     if not isinstance(domain_raw, str) or not domain_raw.strip():
@@ -192,7 +257,8 @@ def verify_single_email(firstname: str, lastname: str, company_url: str, api_key
                     'company': domain,
                     'email': email,
                     'status': status,
-                    'full_name': full_name
+                    'full_name': full_name,
+                    'all_formats_tested': email_formats
                 }
         
         # Small delay to avoid rate limiting
@@ -200,52 +266,8 @@ def verify_single_email(firstname: str, lastname: str, company_url: str, api_key
     
     return None
 
-# Streamlit App
-def main():
-    # Header
-    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Email verification made simple and efficient</p>', unsafe_allow_html=True)
-    
-    # Sidebar for API key
-    with st.sidebar:
-        st.header("🔑 Configuration")
-        api_key = st.text_input(
-            "Enter your Reoon API Key",
-            type="password",
-            help="Get your API key from https://emailverifier.reoon.com/"
-        )
-        
-        st.markdown("---")
-        st.subheader("📋 CSV Format Required")
-        st.markdown("""
-        Your CSV file should contain these columns:
-        - **firstname**: First name
-        - **lastname**: Last name  
-        - **companyURL**: Company website URL
-        
-        Example:
-        ```
-        firstname,lastname,companyURL
-        John,Smith,https://company.com
-        Jane,Doe,www.example.org
-        ```
-        """)
-        
-        st.markdown("---")
-        st.subheader("ℹ️ How it works")
-        st.markdown("""
-        1. Upload your CSV file
-        2. Enter your API key
-        3. Click 'Start Verification'
-        4. Download verified emails
-        """)
-    
-    # Main content area
-    if not api_key:
-        st.warning("⚠️ Please enter your API key in the sidebar to continue.")
-        return
-    
-    # File upload section
+def render_csv_upload_tab(api_key: str):
+    """Renders the CSV upload tab content."""
     st.subheader("📁 Upload CSV File")
     uploaded_file = st.file_uploader(
         "Choose a CSV file",
@@ -298,7 +320,7 @@ def main():
             # Verification section
             st.subheader("🚀 Email Verification")
             
-            if st.button("Start Verification", type="primary"):
+            if st.button("Start Verification", type="primary", key="csv_verify"):
                 # Initialize progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -371,6 +393,215 @@ def main():
                     
         except Exception as e:
             st.error(f"❌ Error processing file: {str(e)}")
+
+def render_single_entry_tab(api_key: str):
+    """Renders the single entry verification tab content."""
+    st.subheader("👤 Single Email Verification")
+    
+    # Create a form container
+    with st.container():
+        st.markdown('<div class="single-entry-form">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            firstname = st.text_input(
+                "First Name",
+                placeholder="e.g., John",
+                help="Enter the person's first name"
+            )
+        
+        with col2:
+            lastname = st.text_input(
+                "Last Name", 
+                placeholder="e.g., Smith",
+                help="Enter the person's last name"
+            )
+        
+        company_url = st.text_input(
+            "Company URL",
+            placeholder="e.g., https://company.com or company.com",
+            help="Enter the company website URL"
+        )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Verify button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            verify_btn = st.button(
+                "🔍 Verify Email", 
+                type="primary",
+                use_container_width=True,
+                key="single_verify"
+            )
+    
+    # Verification logic
+    if verify_btn:
+        if not firstname or not lastname or not company_url:
+            st.error("❌ Please fill in all fields (First Name, Last Name, and Company URL)")
+            return
+        
+        # Show processing
+        with st.spinner("🔍 Searching for email address..."):
+            # Clean inputs
+            firstname_clean = firstname.strip()
+            lastname_clean = lastname.strip()
+            company_url_clean = company_url.strip()
+            
+            # Verify email
+            result = verify_single_email(firstname_clean, lastname_clean, company_url_clean, api_key)
+            
+        # Display results
+        st.subheader("🎯 Verification Results")
+        
+        if result:
+            # Email found
+            st.markdown(f"""
+            <div class="email-found">
+                ✅ Email Found!<br>
+                📧 {result['email']}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Detailed results
+            st.markdown(f"""
+            <div class="result-card">
+                <h3>📋 Verification Details</h3>
+                <p><strong>👤 Full Name:</strong> {result['full_name']}</p>
+                <p><strong>🏢 Company:</strong> {result['company']}</p>
+                <p><strong>📧 Email:</strong> {result['email']}</p>
+                <p><strong>✅ Status:</strong> {result['status'].title()}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show tested formats
+            with st.expander("🔍 View All Tested Email Formats"):
+                tested_formats = result.get('all_formats_tested', [])
+                for i, email_format in enumerate(tested_formats, 1):
+                    if email_format == result['email']:
+                        st.success(f"{i}. {email_format} ✅ (Valid)")
+                    else:
+                        st.text(f"{i}. {email_format}")
+            
+            # Download single result
+            single_result_df = pd.DataFrame([{
+                'firstname': result['firstname'],
+                'lastname': result['lastname'], 
+                'company': result['company'],
+                'email': result['email'],
+                'status': result['status']
+            }])
+            
+            csv_buffer = io.StringIO()
+            single_result_df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            
+            st.download_button(
+                label="📥 Download Result as CSV",
+                data=csv_data,
+                file_name=f"email_verification_{firstname_clean}_{lastname_clean}_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                type="secondary"
+            )
+            
+        else:
+            # Email not found
+            st.markdown(f"""
+            <div class="email-not-found">
+                ❌ No Valid Email Found<br>
+                for {firstname_clean} {lastname_clean} at {clean_domain(company_url_clean)}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show what was tested
+            domain = clean_domain(company_url_clean)
+            if domain:
+                full_name = f"{firstname_clean} {lastname_clean}"
+                first, middle, last = parse_name(full_name)
+                
+                if first and last:
+                    tested_formats = generate_email_formats(first, middle, last, domain)
+                    
+                    with st.expander("🔍 View All Tested Email Formats"):
+                        st.info(f"Tested {len(tested_formats)} different email formats:")
+                        for i, email_format in enumerate(tested_formats, 1):
+                            st.text(f"{i}. {email_format}")
+                    
+                    st.info("💡 **Tip:** The email might not exist, or the person might use a different email format not covered by our algorithm.")
+            else:
+                st.error("❌ Invalid company URL provided. Please check the URL format.")
+
+# Main Streamlit App
+def main():
+    # Header
+    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
+    
+    # Sidebar for API key
+    with st.sidebar:
+        st.header("🔑 Configuration")
+        api_key = st.text_input(
+            "Enter your Reoon API Key",
+            type="password",
+            help="Get your API key from https://emailverifier.reoon.com/"
+        )
+        
+        st.markdown("---")
+        st.subheader("📋 CSV Format Required")
+        st.markdown("""
+        Your CSV file should contain these columns:
+        - **firstname**: First name
+        - **lastname**: Last name  
+        - **companyURL**: Company website URL
+        
+        Example:
+        ```
+        firstname,lastname,companyURL
+        John,Smith,https://company.com
+        Jane,Doe,www.example.org
+        ```
+        """)
+        
+        st.markdown("---")
+        st.subheader("ℹ️ How it works")
+        st.markdown("""
+        **CSV Mode:**
+        1. Upload your CSV file
+        2. Enter your API key
+        3. Click 'Start Verification'
+        4. Download verified emails
+        
+        **Single Entry Mode:**
+        1. Enter individual details
+        2. Click 'Verify Email'
+        3. Get instant results
+        """)
+        
+        st.markdown("---")
+        st.subheader("🎯 Email Patterns Tested")
+        st.markdown("""
+        Our algorithm tests multiple patterns:
+        - firstname.lastname@domain.com
+        - firstname@domain.com
+        - f.lastname@domain.com
+        - flastname@domain.com
+        - And 10+ more formats...
+        """)
+    
+    # Main content area
+    if not api_key:
+        st.warning("⚠️ Please enter your API key in the sidebar to continue.")
+        return
+    
+    # Tab structure
+    tab1, tab2 = st.tabs(["📁 CSV Upload", "👤 Single Entry"])
+    
+    with tab1:
+        render_csv_upload_tab(api_key)
+    
+    with tab2:
+        render_single_entry_tab(api_key)
 
 if __name__ == "__main__":
     main()
