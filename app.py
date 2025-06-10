@@ -400,7 +400,7 @@ def render_single_entry_tab(api_key: str):
     
     # Create a form container
     with st.container():
-        st.markdown('<div class="single-entry-form">', unsafe_allow_html=True)
+        # st.markdown('<div class="single-entry-form">', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         
