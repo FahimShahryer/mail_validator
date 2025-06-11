@@ -270,15 +270,18 @@ def render_csv_upload_tab(api_key: str):
     """Renders the CSV upload tab content."""
     st.subheader("📁 Upload CSV File")
     uploaded_file = st.file_uploader(
-        "Choose a CSV file",
-        type=['csv'],
-        help="Upload a CSV file with firstname, lastname, and companyURL columns"
+        "Choose a CSV or Excel file",
+        type=['csv', 'xlsx'],
+        help="Upload a CSV or Excel file with firstname, lastname, and companyURL columns"
     )
     
     if uploaded_file is not None:
         try:
-            # Read CSV
-            df = pd.read_csv(uploaded_file)
+            # Read CSV or Excel file
+            if uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file)
+            else:
+                df = pd.read_csv(uploaded_file)
             
             # Validate required columns
             required_columns = ['firstname', 'lastname', 'companyURL']
