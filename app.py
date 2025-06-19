@@ -225,6 +225,315 @@ def verify_email_api(email: str, api_key: str) -> dict:
     except json.JSONDecodeError:
         return {"error": "Failed to decode API response"}
 
+def verify_single_email(firstname: str, lastname: str, company_url: str, api_key: str) -> Optional[dict]:
+    """Verify email for a single person and return result if valid."""
+    # Clean and parse inputs
+    domain = clean_domain(company_url)
+    if not domain:
+        return None
+    
+    # Combine names
+    full_name = f"{firstname} {lastname}".strip()
+    first, middle, last = parse_name(full_name)
+    
+    if not first or not last:
+        return None
+    
+    # Generate email formats
+    email_formats = generate_email_formats(first, middle, last, domain)
+    
+    # Test each format
+    forbidden_statuses = ["invalid", "disabled", "unknown"]
+    
+    for email in email_formats:
+        result = verify_email_api(email, api_key)
+        
+        if result and 'error' not in result:
+            status = result.get("status", "unknown")
+            if status not in forbidden_statuses:
+                return {
+                    'firstname': firstname,
+                    'lastname': lastname,
+                    'company': domain,
+                    'email': email,
+                    'status': status,
+                    'full_name': full_name,
+                    'all_formats_tested': email_formats
+                }
+        
+        # Small delay to avoid rate limiting
+        time.sleep(0.3)
+    
+    return None
+
+def render_csv_upload_tab(api_key: str):
+    """Renders the CSV upload tab content."""
+    st.subheader("📁 Upload CSV File")
+    uploaded_file = st.file_uploader(
+        "Choose a CSV or Excel file",
+        type=['csv', 'xlsx'],
+        help="Upload a CSV or Excel file with firstname, lastname, and companyURL columns"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read CSV or Excel file
+            if uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file)
+            else:
+                df = pd.read_csv(uploaded_file)
+            
+            # Validate required columns
+            required_columns = ['firstname', 'lastname', 'companyURL']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                st.error(f"❌ Missing required columns: {', '.join(missing_columns)}")
+                return
+            
+            # Show preview
+            st.subheader("📊 Data Preview")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Total Rows", len(df))
+            with col2:
+                valid_rows = len(df.dropna(subset=['firstname', 'lastname', 'companyURL']))
+                st.metric("Valid Rows", valid_rows)
+            with col3:
+                null_rows = len(df) - valid_rows
+                st.metric("Rows with Nulls", null_rows)
+            
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            # Clean data - remove rows with null values
+            df_clean = df.dropna(subset=['firstname', 'lastname', 'companyURL']).copy()
+            df_clean = df_clean[
+                (df_clean['firstname'].str.strip() != '') & 
+                (df_clean['lastname'].str.strip() != '') & 
+                (df_clean['companyURL'].str.strip() != '')
+            ]
+            
+            if len(df_clean) == 0:
+                st.error("❌ No valid rows found after cleaning. Please check your data.")
+                return
+            
+            st.info(f"📋 {len(df_clean)} rows will be processed (after removing nulls/empty values)")
+            
+            # Verification section
+            st.subheader("🚀 Email Verification")
+            
+            if st.button("Start Verification", type="primary", key="csv_verify"):
+                # Initialize progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                results_container = st.empty()
+                
+                verified_emails = []
+                total_rows = len(df_clean)
+                
+                # Process each row
+                for index, row in df_clean.iterrows():
+                    progress = (index + 1) / total_rows
+                    progress_bar.progress(progress)
+                    status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
+                    
+                    # Verify email
+                    result = verify_single_email(
+                        str(row['firstname']).strip(),
+                        str(row['lastname']).strip(), 
+                        str(row['companyURL']).strip(),
+                        api_key
+                    )
+                    
+                    if result:
+                        verified_emails.append(result)
+                        
+                        # Update live results
+                        with results_container.container():
+                            st.success(f"✅ Found: {result['email']} for {result['full_name']}")
+                
+                # Complete
+                progress_bar.progress(1.0)
+                status_text.text("✅ Verification completed!")
+                
+                # Results
+                st.subheader("📈 Verification Results")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Processed", total_rows)
+                with col2:
+                    st.metric("Emails Found", len(verified_emails))
+                with col3:
+                    success_rate = (len(verified_emails) / total_rows * 100) if total_rows > 0 else 0
+                    st.metric("Success Rate", f"{success_rate:.1f}%")
+                
+                if verified_emails:
+                    # Create results DataFrame
+                    results_df = pd.DataFrame(verified_emails)
+                    results_df = results_df[['firstname', 'lastname', 'company', 'email', 'status']]
+                    
+                    st.subheader("📋 Verified Emails")
+                    st.dataframe(results_df, use_container_width=True)
+                    
+                    # Download button
+                    csv_buffer = io.StringIO()
+                    results_df.to_csv(csv_buffer, index=False)
+                    csv_data = csv_buffer.getvalue()
+                    
+                    st.download_button(
+                        label="📥 Download Verified Emails CSV",
+                        data=csv_data,
+                        file_name=f"verified_emails_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        type="primary"
+                    )
+                    
+                    st.success(f"🎉 Successfully found {len(verified_emails)} valid email addresses!")
+                else:
+                    st.warning("⚠️ No valid email addresses were found for the provided data.")
+                    
+        except Exception as e:
+            st.error(f"❌ Error processing file: {str(e)}")
+
+def render_single_entry_tab(api_key: str):
+    """Renders the single entry verification tab content."""
+    st.subheader("👤 Single Email Verification")
+    
+    # Create a form container
+    with st.container():
+        # st.markdown('<div class="single-entry-form">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            firstname = st.text_input(
+                "First Name",
+                placeholder="e.g., John",
+                help="Enter the person's first name"
+            )
+        
+        with col2:
+            lastname = st.text_input(
+                "Last Name", 
+                placeholder="e.g., Smith",
+                help="Enter the person's last name"
+            )
+        
+        company_url = st.text_input(
+            "Company URL",
+            placeholder="e.g., https://company.com or company.com",
+            help="Enter the company website URL"
+        )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Verify button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            verify_btn = st.button(
+                "🔍 Verify Email", 
+                type="primary",
+                use_container_width=True,
+                key="single_verify"
+            )
+    
+    # Verification logic
+    if verify_btn:
+        if not firstname or not lastname or not company_url:
+            st.error("❌ Please fill in all fields (First Name, Last Name, and Company URL)")
+            return
+        
+        # Show processing
+        with st.spinner("🔍 Searching for email address..."):
+            # Clean inputs
+            firstname_clean = firstname.strip()
+            lastname_clean = lastname.strip()
+            company_url_clean = company_url.strip()
+            
+            # Verify email
+            result = verify_single_email(firstname_clean, lastname_clean, company_url_clean, api_key)
+            
+        # Display results
+        st.subheader("🎯 Verification Results")
+        
+        if result:
+            # Email found
+            st.markdown(f"""
+            <div class="email-found">
+                ✅ Email Found!<br>
+                📧 {result['email']}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Detailed results
+            st.markdown(f"""
+            <div class="result-card">
+                <h3>📋 Verification Details</h3>
+                <p><strong>👤 Full Name:</strong> {result['full_name']}</p>
+                <p><strong>🏢 Company:</strong> {result['company']}</p>
+                <p><strong>📧 Email:</strong> {result['email']}</p>
+                <p><strong>✅ Status:</strong> {result['status'].title()}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show tested formats
+            with st.expander("🔍 View All Tested Email Formats"):
+                tested_formats = result.get('all_formats_tested', [])
+                for i, email_format in enumerate(tested_formats, 1):
+                    if email_format == result['email']:
+                        st.success(f"{i}. {email_format} ✅ (Valid)")
+                    else:
+                        st.text(f"{i}. {email_format}")
+            
+            # Download single result
+            single_result_df = pd.DataFrame([{
+                'firstname': result['firstname'],
+                'lastname': result['lastname'], 
+                'company': result['company'],
+                'email': result['email'],
+                'status': result['status']
+            }])
+            
+            csv_buffer = io.StringIO()
+            single_result_df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            
+            st.download_button(
+                label="📥 Download Result as CSV",
+                data=csv_data,
+                file_name=f"email_verification_{firstname_clean}_{lastname_clean}_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                type="secondary"
+            )
+            
+        else:
+            # Email not found
+            st.markdown(f"""
+            <div class="email-not-found">
+                ❌ No Valid Email Found<br>
+                for {firstname_clean} {lastname_clean} at {clean_domain(company_url_clean)}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show what was tested
+            domain = clean_domain(company_url_clean)
+            if domain:
+                full_name = f"{firstname_clean} {lastname_clean}"
+                first, middle, last = parse_name(full_name)
+                
+                if first and last:
+                    tested_formats = generate_email_formats(first, middle, last, domain)
+                    
+                    with st.expander("🔍 View All Tested Email Formats"):
+                        st.info(f"Tested {len(tested_formats)} different email formats:")
+                        for i, email_format in enumerate(tested_formats, 1):
+                            st.text(f"{i}. {email_format}")
+                    
+                    st.info("💡 **Tip:** The email might not exist, or the person might use a different email format not covered by our algorithm.")
+            else:
+                st.error("❌ Invalid company URL provided. Please check the URL format.")
 
 
 # Add these imports at the top of your app.py file
