@@ -1,5 +1,36 @@
+# Core packages for Email Verification System
+streamlit
+pandas
+requests
+
+# Excel file support
 openpyxl
+xlrd
+
+# HTML parsing and web scraping
 beautifulsoup4
-lxml
+
+# Enhanced LinkedIn search functionality
 googlesearch-python
 selenium
+
+# Auto ChromeDriver management
+webdriver-manager
+
+# Better encoding detection for CSV files
+chardet
+
+# URL parsing utilities
+urllib3
+
+# Additional utilities for better regex and text processing
+regex
+
+# For better date/time handling
+python-dateutil
+
+# For better performance with large datasets
+numpy
+
+# For progress bars
+tqdm
