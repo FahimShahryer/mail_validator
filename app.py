@@ -14,7 +14,7 @@ import logging
 
 # Page configuration
 PAGE_CONFIG = {
-    "page_title": "Email Verifier Pro",
+    "page_title": "Mail Validator",
     "page_icon": "📧",
     "layout": "wide",
     "initial_sidebar_state": "expanded"
@@ -423,7 +423,7 @@ class DataProcessor:
 def api_key_dialog():
     """Modal dialog for API key input."""
     st.markdown("""
-    ### Welcome to Email Verifier Pro! 
+    ### Welcome to Mail Validator! 
     
     To get started, please enter your Reoon API key. You can get your API key from:
     👉 **https://emailverifier.reoon.com/**
@@ -479,7 +479,7 @@ class UIRenderer:
     def render_sidebar():
         """Render sidebar with help information only."""
         with st.sidebar:
-            st.header("ℹ️ Help & Information")
+            st.header("Mail Validator")
             
             # Show current API key status
             if st.session_state.get('api_key_validated', False):
@@ -914,9 +914,9 @@ def main():
     # Load custom CSS
     load_custom_css()
     
-    # Header
-    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
+    # # Header
+    # st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
+    # st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
     
     # Check if API key is set, if not show dialog
     if not st.session_state.get('api_key_validated', False):
