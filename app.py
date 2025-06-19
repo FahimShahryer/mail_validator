@@ -454,75 +454,68 @@ class DataProcessor:
 # ========================================
 
 def render_column_mapping_interface(df: pd.DataFrame) -> Dict[str, str]:
-    """Render column mapping interface and return the mapping."""
-    st.subheader("🔗 Map Your Columns")
-    st.info("Please select which columns in your file correspond to the required fields:")
+    """Clean column mapping interface."""
+    st.subheader("🔗 Column Mapping")
     
     # Get available columns
-    available_columns = [''] + list(df.columns)  # Add empty option
+    available_columns = [''] + list(df.columns)
     column_mapping = {}
     
-    # Create mapping interface
+    # Create clean 3-column layout
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("**🧑 First Name**")
+        st.markdown("**First Name**")
         firstname_col = st.selectbox(
-            "Select First Name Column",
+            "Select column",
             available_columns,
             key="firstname_mapping",
-            help="Choose the column containing first names"
+            label_visibility="collapsed"
         )
         if firstname_col:
             column_mapping['firstname'] = firstname_col
-            st.success(f"✅ Mapped to: {firstname_col}")
+            st.success(f"✓ {firstname_col}")
     
     with col2:
-        st.markdown("**👤 Last Name**")
+        st.markdown("**Last Name**")
         lastname_col = st.selectbox(
-            "Select Last Name Column", 
+            "Select column", 
             available_columns,
             key="lastname_mapping",
-            help="Choose the column containing last names"
+            label_visibility="collapsed"
         )
         if lastname_col:
             column_mapping['lastname'] = lastname_col
-            st.success(f"✅ Mapped to: {lastname_col}")
+            st.success(f"✓ {lastname_col}")
     
     with col3:
-        st.markdown("**🏢 Company URL**")
+        st.markdown("**Company URL**")
         company_col = st.selectbox(
-            "Select Company URL Column",
+            "Select column",
             available_columns,
-            key="company_mapping", 
-            help="Choose the column containing company URLs/domains"
+            key="company_mapping",
+            label_visibility="collapsed"
         )
         if company_col:
             column_mapping['companyURL'] = company_col
-            st.success(f"✅ Mapped to: {company_col}")
+            st.success(f"✓ {company_col}")
     
     return column_mapping
 
 def render_mapped_data_preview(df: pd.DataFrame, column_mapping: Dict[str, str]):
-    """Show preview of data with mapped columns."""
-    if len(column_mapping) == 3:  # All fields mapped
-        st.subheader("📋 Data Preview (Mapped Columns)")
-        
+    """Clean data preview."""
+    if len(column_mapping) == 3:
         # Create preview with mapped columns
         mapped_columns = list(column_mapping.values())
         preview_df = df[mapped_columns].copy()
         
         # Rename for display
-        display_mapping = {v: f"{REQUIRED_FIELDS[k]} ({v})" for k, v in column_mapping.items()}
+        display_mapping = {v: REQUIRED_FIELDS[k] for k, v in column_mapping.items()}
         preview_df = preview_df.rename(columns=display_mapping)
         
-        st.dataframe(preview_df.head(10), use_container_width=True)
-        
-        # Show mapping summary
-        st.markdown("**📊 Column Mapping Summary:**")
-        for field, display_name in REQUIRED_FIELDS.items():
-            if field in column_mapping:
-                st.write(f"• **{display_name}** → `{column_mapping[field]}`")
+        # Show preview in clean format
+        with st.expander("📋 Data Preview", expanded=False):
+            st.dataframe(preview_df.head(10), use_container_width=True)
         
         return True
     return False
@@ -531,60 +524,40 @@ def render_mapped_data_preview(df: pd.DataFrame, column_mapping: Dict[str, str])
 # API KEY DIALOG
 # ========================================
 
-@st.dialog("🔑 API Key Required", width="large")
+@st.dialog("🔑 API Configuration", width="large")
 def api_key_dialog():
-    """Modal dialog for API key input."""
-    st.markdown("""
-    ### Welcome to Email Verifier Pro! 
-    
-    To get started, please enter your Reoon API key. You can get your API key from:
-    👉 **https://emailverifier.reoon.com/**
-    """)
+    """Clean API key input dialog."""
+    st.markdown("### Enter your Reoon API Key")
+    st.info("Get your API key from: **https://emailverifier.reoon.com/**")
     
     # API key input
     api_key = st.text_input(
-        "Enter your Reoon API Key",
+        "API Key",
         type="password",
-        placeholder="Enter your API key here...",
-        help="Your API key will be stored securely for this session"
+        placeholder="Enter your API key here..."
     )
     
-    # Instructions
-    st.markdown("""
-    #### 📋 What you can do with this tool:
-    - **📊 Flexible CSV Upload**: Use ANY column names - map them after upload!
-    - **👤 Single Entry**: Verify email for individual person
-    - **🧠 Smart Algorithm**: Tests 10+ email format patterns automatically
-    - **⚡ Efficient**: Stops searching when valid email is found
-    
-    #### 📂 Supported File Formats:
-    - ✅ **CSV files** (.csv) with any column names
-    - ✅ **Excel files** (.xlsx) with any column names  
-    - ✅ **Flexible structure** - you choose which columns to use
-    
-    #### 🔗 Column Mapping Examples:
-    Your file can have columns like:
-    ```
-    fname, lname, website          →  Map to First Name, Last Name, Company URL
-    first_name, surname, domain    →  Map to First Name, Last Name, Company URL  
-    FirstName, LastName, Company   →  Map to First Name, Last Name, Company URL
-    ```
-    """)
-    
-    # Submit button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🚀 Start Email Verification", type="primary", use_container_width=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Save & Continue", type="primary", use_container_width=True):
             if api_key and validate_api_key(api_key):
                 st.session_state.api_key = api_key
                 st.session_state.api_key_validated = True
-                st.success("✅ API key saved successfully!")
-                time.sleep(1)  # Brief pause for user feedback
+                st.success("API key saved!")
+                time.sleep(0.5)
                 st.rerun()
-            elif not api_key:
-                st.error("❌ Please enter your API key")
             else:
-                st.error("❌ Please enter a valid API key (minimum 10 characters)")
+                st.error("Please enter a valid API key")
+    
+    with col2:
+        with st.expander("ℹ️ About this tool"):
+            st.markdown("""
+            **Features:**
+            - Bulk email verification from CSV/Excel
+            - Single email verification  
+            - Smart email pattern detection
+            - Efficient API usage
+            """)
 
 # ========================================
 # UI COMPONENT RENDERERS
@@ -595,75 +568,42 @@ class UIRenderer:
     
     @staticmethod
     def render_sidebar():
-        """Render sidebar with help information only."""
+        """Clean sidebar with minimal information."""
         with st.sidebar:
-            st.header("ℹ️ Help & Information")
-            
-            # Show current API key status
+            # API Status
             if st.session_state.get('api_key_validated', False):
-                st.success("🔑 API Key: ✅ Active")
-                if st.button("🔄 Change API Key", type="secondary"):
+                st.success("🔑 API Connected")
+                if st.button("Change API Key", type="secondary", use_container_width=True):
                     st.session_state.api_key = None
                     st.session_state.api_key_validated = False
                     st.rerun()
             else:
-                st.error("🔑 API Key: ❌ Not Set")
+                st.error("🔑 No API Key")
             
             st.markdown("---")
-            st.subheader("📋 Flexible CSV Format")
-            st.markdown("""
-            **Your CSV can have ANY column names!** 
             
-            After uploading, you'll map your columns to:
-            - **First Name**: Person's first name
-            - **Last Name**: Person's last name  
-            - **Company URL**: Company website
+            # Help section in expander
+            with st.expander("📋 File Format Help"):
+                st.markdown("""
+                **Supported Files:**
+                - CSV (.csv)
+                - Excel (.xlsx)
+                
+                **Required Data:**
+                - First Name
+                - Last Name  
+                - Company URL/Domain
+                """)
             
-            Examples of supported formats:
-            ```csv
-            fname,lname,website
-            first_name,surname,domain
-            FirstName,LastName,CompanyWebsite
-            given_name,family_name,url
-            ```
-            """)
-            
-            st.markdown("---")
-            st.subheader("📊 Supported File Types")
-            st.markdown("""
-            - ✅ **CSV files** (.csv)
-            - ✅ **Excel files** (.xlsx)
-            - ✅ **Any column names**
-            - ✅ **Flexible structure**
-            """)
-            
-            st.markdown("---")
-            st.subheader("🎯 Email Patterns Tested")
-            st.markdown("""
-            Our algorithm tests multiple patterns:
-            - firstname.lastname@domain.com
-            - firstname@domain.com
-            - f.lastname@domain.com
-            - flastname@domain.com
-            - And 10+ more formats...
-            """)
-            
-            st.markdown("---")
-            st.subheader("⚡ How it works")
-            st.markdown("""
-            **CSV Mode:**
-            1. Upload your CSV file
-            2. Click 'Start Verification'
-            3. Download verified emails
-            
-            **Single Entry Mode:**
-            1. Enter individual details
-            2. Click 'Verify Email'
-            3. Get instant results
-            """)
-            
-            st.markdown("---")
-            st.info("💡 **Tip**: The algorithm stops testing email formats as soon as it finds a valid one, saving API calls!")
+            with st.expander("🎯 Email Patterns"):
+                st.markdown("""
+                **Tested Formats:**
+                - firstname.lastname@domain.com
+                - firstname@domain.com
+                - f.lastname@domain.com
+                - flastname@domain.com
+                - +10 more patterns...
+                """)
             
             return st.session_state.get('api_key')
     
@@ -725,385 +665,302 @@ class UIRenderer:
 # ========================================
 
 def render_csv_upload_tab(api_key: str):
-    """Render CSV upload tab content with flexible column mapping."""
+    """Clean CSV upload tab with professional layout."""
     verifier = EmailVerifier(api_key)
     processor = DataProcessor()
-    renderer = UIRenderer()
     
-    st.subheader("📁 Upload CSV or Excel File")
-    st.info("💡 **New!** Your file can have any column names - you'll map them after upload!")
-    
-    uploaded_file = st.file_uploader(
-        "Choose a CSV or Excel file",
-        type=['csv', 'xlsx'],
-        help="Upload any CSV or Excel file with names and company information"
-    )
+    # File upload section
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        uploaded_file = st.file_uploader(
+            "Upload CSV or Excel File",
+            type=['csv', 'xlsx'],
+            help="Any column names supported"
+        )
+    with col2:
+        with st.expander("File Requirements"):
+            st.markdown("""
+            **Required Data:**
+            - First names
+            - Last names  
+            - Company URLs
+            
+            **Formats:** CSV, Excel
+            """)
     
     if uploaded_file is not None:
         try:
             # Load file
             df = processor.load_csv_file(uploaded_file)
             
-            # Show basic file info
-            st.success(f"✅ File loaded successfully! Found {len(df)} rows and {len(df.columns)} columns.")
+            # File info
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Rows", len(df))
+            with col2:
+                st.metric("Columns", len(df.columns))
+            with col3:
+                with st.expander("View Columns"):
+                    for col in df.columns:
+                        st.write(f"• {col}")
             
-            # Show available columns
-            with st.expander("📋 View All Columns in Your File", expanded=False):
-                st.write("**Available columns:**")
-                for i, col in enumerate(df.columns, 1):
-                    st.write(f"{i}. `{col}`")
-            
-            # Column mapping interface
+            # Column mapping
             column_mapping = render_column_mapping_interface(df)
             
             # Validate mapping
             is_mapping_valid, mapping_errors = validate_column_mapping(column_mapping, df.columns.tolist())
             
             if not is_mapping_valid:
-                st.error("❌ **Column Mapping Issues:**")
-                for error in mapping_errors:
-                    st.error(f"• {error}")
-                st.warning("Please complete the column mapping to continue.")
+                st.error("Please complete column mapping")
                 return
             
-            # Show mapped data preview
-            preview_shown = render_mapped_data_preview(df, column_mapping)
+            # Data preview
+            render_mapped_data_preview(df, column_mapping)
             
-            if preview_shown:
-                # Get statistics with mapped columns
-                stats = processor.get_data_stats(df, column_mapping)
+            # Clean data and show stats
+            df_clean = processor.clean_dataframe(df, column_mapping)
+            
+            if len(df_clean) == 0:
+                st.error("No valid data found")
+                return
+            
+            # Processing section
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.metric("Ready to Process", len(df_clean))
+            with col2:
+                start_btn = st.button("🚀 Start Verification", type="primary", use_container_width=True)
+            
+            if start_btn:
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
+                # Results containers
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Total Rows", stats['total_rows'])
+                    calls_metric = st.empty()
                 with col2:
-                    st.metric("Valid Rows", stats['valid_rows'])
+                    found_metric = st.empty()
                 with col3:
-                    st.metric("Rows with Missing Data", stats['null_rows'])
+                    rate_metric = st.empty()
                 
-                # Clean data with mapping
-                df_clean = processor.clean_dataframe(df, column_mapping)
+                results_container = st.container()
                 
-                if len(df_clean) == 0:
-                    st.error("❌ No valid rows found after cleaning. Please check your data has values in all mapped columns.")
-                    return
+                verified_emails = []
+                total_rows = len(df_clean)
+                total_api_calls = 0
                 
-                st.info(f"📋 {len(df_clean)} rows will be processed (after removing missing/empty values)")
-                
-                # Verification section
-                st.subheader("🚀 Email Verification")
-                
-                if st.button("Start Verification", type="primary", key="csv_verify"):
-                    # Initialize progress tracking
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    results_container = st.empty()
-                    efficiency_container = st.empty()
+                # Process each row
+                for index, row in df_clean.iterrows():
+                    progress = (index + 1) / total_rows
+                    progress_bar.progress(progress)
+                    status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
                     
-                    verified_emails = []
-                    total_rows = len(df_clean)
-                    total_api_calls = 0
+                    # Verify email
+                    result = verifier.verify_single_email(
+                        str(row['firstname']).strip(),
+                        str(row['lastname']).strip(), 
+                        str(row['companyURL']).strip()
+                    )
                     
-                    # Process each row (df_clean now has standardized column names)
-                    for index, row in df_clean.iterrows():
-                        progress = (index + 1) / total_rows
-                        progress_bar.progress(progress)
-                        status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
+                    if result is not None:
+                        found_attempt = result.get('found_on_attempt', 0)
+                        total_formats = result.get('total_formats_available', 0)
+                        api_calls_used = found_attempt if found_attempt > 0 else total_formats
+                        total_api_calls += api_calls_used
                         
-                        # Verify email (using standardized column names)
-                        result = verifier.verify_single_email(
-                            str(row['firstname']).strip(),
-                            str(row['lastname']).strip(), 
-                            str(row['companyURL']).strip()
-                        )
-                        
-                        if result is not None:
-                            # Track API efficiency - ensure we always have valid integers
-                            found_attempt = result.get('found_on_attempt', 0)
-                            total_formats = result.get('total_formats_available', 0)
+                        if result.get('email'):
+                            verified_emails.append({
+                                'firstname': result['firstname'],
+                                'lastname': result['lastname'],
+                                'company': result['company'],
+                                'email': result['email'],
+                                'status': result['status']
+                            })
                             
-                            # Use the actual attempts made (found_attempt or total if not found)
-                            api_calls_used = found_attempt if found_attempt > 0 else total_formats
-                            total_api_calls += api_calls_used
-                            
-                            if result.get('email'):  # Valid email found
-                                verified_emails.append({
-                                    'firstname': result['firstname'],
-                                    'lastname': result['lastname'],
-                                    'company': result['company'],
-                                    'email': result['email'],
-                                    'status': result['status'],
-                                    'found_on_attempt': result.get('found_on_attempt', 0),
-                                    'total_formats_tested': result.get('total_formats_available', 0)
-                                })
-                                
-                                # Update live results
-                                with results_container.container():
-                                    st.success(f"✅ Found: {result['email']} for {result['full_name']} (attempt {result.get('found_on_attempt', 'N/A')})")
-                        else:
-                            # Handle case where domain parsing failed
-                            logger.warning(f"Failed to process domain for {row['firstname']} {row['lastname']} - {row['companyURL']}")
-                            with results_container.container():
-                                st.warning(f"⚠️ Invalid domain for {row['firstname']} {row['lastname']}: {row['companyURL']}")
-                        
-                        # Update efficiency metrics (moved outside the if-else block)
-                        avg_calls_per_person = total_api_calls / (index + 1) if (index + 1) > 0 else 0
-                        with efficiency_container.container():
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Total API Calls", total_api_calls)
-                            with col2:
-                                st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
-                            with col3:
-                                st.metric("Emails Found", len(verified_emails))
+                            with results_container:
+                                st.success(f"✅ {result['email']}")
                     
-                    # Complete processing
-                    progress_bar.progress(1.0)
-                    status_text.text("✅ Verification completed!")
+                    # Update metrics
+                    calls_metric.metric("API Calls", total_api_calls)
+                    found_metric.metric("Emails Found", len(verified_emails))
+                    if index + 1 > 0:
+                        rate = (len(verified_emails) / (index + 1)) * 100
+                        rate_metric.metric("Success Rate", f"{rate:.1f}%")
+                
+                # Complete
+                progress_bar.progress(1.0)
+                status_text.success("✅ Verification completed!")
+                
+                # Results
+                if verified_emails:
+                    st.subheader("📋 Results")
+                    results_df = pd.DataFrame(verified_emails)
+                    st.dataframe(results_df, use_container_width=True)
                     
-                    # Show results
-                    renderer.render_verification_results(verified_emails, total_rows, total_api_calls)
+                    # Download
+                    csv_buffer = io.StringIO()
+                    results_df.to_csv(csv_buffer, index=False)
+                    csv_data = csv_buffer.getvalue()
                     
-                    if verified_emails:
-                        # Create results DataFrame
-                        results_df = pd.DataFrame(verified_emails)
-                        results_df = results_df[['firstname', 'lastname', 'company', 'email', 'status', 'found_on_attempt']]
-                        
-                        st.subheader("📋 Verified Emails")
-                        st.dataframe(results_df, use_container_width=True)
-                        
-                        # Show efficiency insights
-                        renderer.render_efficiency_insights(results_df)
-                        
-                        # Download button
-                        csv_buffer = io.StringIO()
-                        results_df.to_csv(csv_buffer, index=False)
-                        csv_data = csv_buffer.getvalue()
-                        
-                        st.download_button(
-                            label="📥 Download Verified Emails CSV",
-                            data=csv_data,
-                            file_name=f"verified_emails_{time.strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            type="primary"
-                        )
-                        
-                        # Success message with efficiency summary
-                        avg_calls = total_api_calls / total_rows if total_rows > 0 else 0
-                        early_stops = sum(1 for result in verified_emails if result['found_on_attempt'] < result['total_formats_tested'])
-                        
-                        st.success(f"🎉 Successfully found {len(verified_emails)} valid email addresses!")
-                        st.info(f"💡 **Efficiency:** Used {total_api_calls} API calls total (avg {avg_calls:.1f} per person). Algorithm stopped early {early_stops} times when valid emails were found.")
-                        
-                        # Show column mapping used
-                        with st.expander("📊 Column Mapping Used"):
-                            for field, display_name in REQUIRED_FIELDS.items():
-                                original_col = column_mapping[field]
-                                st.write(f"• **{display_name}** ← `{original_col}` (from your file)")
-                    else:
-                        st.warning("⚠️ No valid email addresses were found for the provided data.")
-                        
+                    st.download_button(
+                        "📥 Download Results",
+                        data=csv_data,
+                        file_name=f"verified_emails_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    
+                    # Stats in expander
+                    with st.expander("📊 Detailed Statistics"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Processed", total_rows)
+                        with col2:
+                            st.metric("Success Rate", f"{(len(verified_emails)/total_rows*100):.1f}%")
+                        with col3:
+                            st.metric("Avg API Calls", f"{total_api_calls/total_rows:.1f}")
+                else:
+                    st.warning("No emails found")
+                    
         except Exception as e:
-            logger.error(f"Error processing file: {str(e)}")
-            st.error(f"❌ Error processing file: {str(e)}")
-            st.info("💡 **Tips:** Make sure your file is a valid CSV or Excel file with readable data.")
+            st.error(f"Error: {str(e)}")
 
 def render_single_entry_tab(api_key: str):
-    """Render single entry verification tab content."""
+    """Clean single entry tab with professional layout."""
     verifier = EmailVerifier(api_key)
     
-    st.subheader("👤 Single Email Verification")
+    # Input form in columns
+    col1, col2 = st.columns(2)
+    with col1:
+        firstname = st.text_input("First Name", placeholder="John")
+    with col2:
+        lastname = st.text_input("Last Name", placeholder="Smith")
     
-    # Input form
-    with st.container():
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            firstname = st.text_input(
-                "First Name",
-                placeholder="e.g., John",
-                help="Enter the person's first name"
-            )
-        
-        with col2:
-            lastname = st.text_input(
-                "Last Name", 
-                placeholder="e.g., Smith",
-                help="Enter the person's last name"
-            )
-        
-        company_url = st.text_input(
-            "Company URL",
-            placeholder="e.g., https://company.com or company.com",
-            help="Enter the company website URL"
-        )
-        
-        # Verify button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            verify_btn = st.button(
-                "🔍 Verify Email", 
-                type="primary",
-                use_container_width=True,
-                key="single_verify"
-            )
+    company_url = st.text_input("Company URL", placeholder="company.com")
     
-    # Verification logic
+    # Verify button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        verify_btn = st.button("🔍 Verify Email", type="primary", use_container_width=True)
+    
     if verify_btn:
-        # Validate inputs
         if not all([firstname, lastname, company_url]):
-            st.error("❌ Please fill in all fields (First Name, Last Name, and Company URL)")
+            st.error("Please fill all fields")
             return
         
-        # Show processing
-        with st.spinner("🔍 Searching for email address..."):
-            # Clean inputs
-            firstname_clean = firstname.strip()
-            lastname_clean = lastname.strip()
-            company_url_clean = company_url.strip()
+        with st.spinner("Searching..."):
+            result = verifier.verify_single_email(
+                firstname.strip(), 
+                lastname.strip(), 
+                company_url.strip()
+            )
             
-            # Verify email
-            result = verifier.verify_single_email(firstname_clean, lastname_clean, company_url_clean)
-            
-        # Display results
-        st.subheader("🎯 Verification Results")
-        
+        # Results
         if result and result.get('email'):
-            # Email found - success case
+            # Success
             st.markdown(f"""
             <div class="email-found">
-                ✅ Email Found!<br>
-                📧 {result['email']}
+                ✅ Email Found: {result['email']}
             </div>
             """, unsafe_allow_html=True)
             
-            # Detailed results
-            st.markdown(f"""
-            <div class="result-card">
-                <h3>📋 Verification Details</h3>
-                <p><strong>👤 Full Name:</strong> {result['full_name']}</p>
-                <p><strong>🏢 Company:</strong> {result['company']}</p>
-                <p><strong>📧 Email:</strong> {result['email']}</p>
-                <p><strong>✅ Status:</strong> {result['status'].title()}</p>
-                <p><strong>⚡ Found on attempt:</strong> {result.get('found_on_attempt', 'N/A')} of {result.get('total_formats_available', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Efficiency metrics
+            # Details in columns
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("API Calls Used", result.get('found_on_attempt', 'N/A'))
+                st.metric("Status", result['status'].title())
             with col2:
-                st.metric("Total Formats Available", result.get('total_formats_available', 'N/A'))
+                st.metric("Attempts", result.get('found_on_attempt', 'N/A'))
             with col3:
-                total_formats = result.get('total_formats_available', 0)
-                found_attempt = result.get('found_on_attempt', 0)
-                
-                if total_formats > 0 and found_attempt > 0:
-                    efficiency = ((total_formats - found_attempt) / total_formats) * 100
-                    st.metric("API Calls Saved", f"{efficiency:.0f}%")
-                else:
-                    st.metric("API Calls Saved", "N/A")
-            
-            # Show tested formats
-            with st.expander("🔍 View Tested Email Formats"):
-                tested_formats = result.get('formats_tested', [])
-                for i, email_format in enumerate(tested_formats, 1):
-                    if email_format == result['email']:
-                        st.success(f"{i}. {email_format} ✅ (Valid - Search stopped here)")
-                    else:
-                        st.text(f"{i}. {email_format} ❌")
-                
-                untested_count = result.get('total_formats_available', 0) - len(tested_formats)
-                if untested_count > 0:
-                    st.info(f"💡 **Efficiency gain:** {untested_count} additional formats were not tested because a valid email was found early!")
+                total = result.get('total_formats_available', 0)
+                found = result.get('found_on_attempt', 0)
+                if total > 0 and found > 0:
+                    saved = ((total - found) / total) * 100
+                    st.metric("Efficiency", f"{saved:.0f}%")
             
             # Download single result
-            single_result_df = pd.DataFrame([{
+            single_df = pd.DataFrame([{
                 'firstname': result['firstname'],
-                'lastname': result['lastname'], 
-                'company': result['company'],
+                'lastname': result['lastname'],
                 'email': result['email'],
-                'status': result['status'],
-                'found_on_attempt': result.get('found_on_attempt', 0),
-                'api_calls_saved': max(0, result.get('total_formats_available', 0) - result.get('found_on_attempt', 0))
+                'status': result['status']
             }])
             
             csv_buffer = io.StringIO()
-            single_result_df.to_csv(csv_buffer, index=False)
+            single_df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
             
             st.download_button(
-                label="📥 Download Result as CSV",
+                "📥 Download Result",
                 data=csv_data,
-                file_name=f"email_verification_{firstname_clean}_{lastname_clean}_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                file_name=f"email_{firstname}_{lastname}_{time.strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
-                type="secondary"
+                use_container_width=True
             )
             
+            # Details in expander
+            with st.expander("🔍 Format Details"):
+                tested_formats = result.get('formats_tested', [])
+                for i, email_format in enumerate(tested_formats, 1):
+                    if email_format == result['email']:
+                        st.success(f"{i}. {email_format} ✅")
+                    else:
+                        st.text(f"{i}. {email_format} ❌")
+                        
         else:
-            # Email not found - failure case
+            # Not found
             st.markdown(f"""
             <div class="email-not-found">
-                ❌ No Valid Email Found<br>
-                for {firstname_clean} {lastname_clean} at {verifier.clean_domain(company_url_clean)}
+                ❌ No email found for {firstname} {lastname}
             </div>
             """, unsafe_allow_html=True)
             
             if result:
-                # Show what was tested
-                with st.expander("🔍 View All Tested Email Formats"):
+                with st.expander("📋 Formats Tested"):
                     tested_formats = result.get('formats_tested', [])
-                    st.info(f"Tested {len(tested_formats)} different email formats:")
                     for i, email_format in enumerate(tested_formats, 1):
-                        st.text(f"{i}. {email_format} ❌")
-                    
-                    st.info("💡 **Tip:** The email might not exist, or the person might use a different email format not covered by our algorithm.")
-            else:
-                st.error("❌ Invalid company URL provided. Please check the URL format.")
+                        st.text(f"{i}. {email_format}")
 
 # ========================================
 # MAIN APPLICATION
 # ========================================
 
 def main():
-    """Main application entry point."""
-    # Set page configuration
+    """Clean main application."""
+    # Page setup
     st.set_page_config(**PAGE_CONFIG)
     
-    # Initialize session state
+    # Session state
     if 'api_key' not in st.session_state:
         st.session_state.api_key = None
     if 'api_key_validated' not in st.session_state:
         st.session_state.api_key_validated = False
     
-    # Load custom CSS
+    # CSS
     load_custom_css()
     
     # Header
-    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
     
-    # Check if API key is set, if not show dialog
+    # API check
     if not st.session_state.get('api_key_validated', False):
         api_key_dialog()
-        return  # Don't show the rest of the app until API key is set
+        return
     
-    # Render sidebar (now just for help/info)
+    # Sidebar
     renderer = UIRenderer()
     api_key = renderer.render_sidebar()
     
-    # Validate API key (should always be valid at this point, but double-check)
     if not api_key or not validate_api_key(api_key):
-        st.error("❌ API key validation failed. Please refresh the page.")
-        if st.button("🔄 Reset API Key"):
-            st.session_state.api_key = None
-            st.session_state.api_key_validated = False
-            st.rerun()
+        st.error("API validation failed")
         return
     
-    # Main content tabs
-    tab1, tab2 = st.tabs(["📁 CSV Upload", "👤 Single Entry"])
+    # Main tabs
+    tab1, tab2 = st.tabs(["📊 Bulk Verification", "👤 Single Verification"])
     
     with tab1:
         render_csv_upload_tab(api_key)
