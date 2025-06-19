@@ -2111,7 +2111,7 @@ def render_optimized_csv_upload_tab(api_key: str):
             st.info("💡 Try saving your file in UTF-8 encoding or as a different format.")
 
 def run_smart_verification(df: pd.DataFrame, api_key: str):
-    """Run the smart email verification process with proper error handling."""
+    """Run the smart email verification process with proper error handling and progress tracking."""
     
     # Initialize progress tracking
     progress_bar = st.progress(0)
@@ -2123,11 +2123,16 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
     total_rows = len(df)
     total_api_calls = 0
     
-    # Process each row
-    for index, row in df.iterrows():
-        progress = (index + 1) / total_rows
+    # Reset the DataFrame index to ensure proper iteration
+    df_reset = df.reset_index(drop=True)
+    
+    # Process each row with proper progress tracking
+    for row_num, (index, row) in enumerate(df_reset.iterrows()):
+        # FIXED: Use row_num (0-based counter) instead of index for progress calculation
+        progress = min((row_num + 1) / total_rows, 1.0)  # Ensure progress never exceeds 1.0
         progress_bar.progress(progress)
-        status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
+        
+        status_text.text(f"Processing {row_num + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
         
         try:
             # Verify email using the improved algorithm
@@ -2139,7 +2144,7 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
             )
             
             if result:
-                # FIXED: Handle None values properly when tracking API efficiency
+                # Handle None values properly when tracking API efficiency
                 found_on_attempt = result.get('found_on_attempt') or 0
                 total_formats_available = result.get('total_formats_available') or 0
                 
@@ -2147,7 +2152,7 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
                 api_calls_used = found_on_attempt if found_on_attempt > 0 else total_formats_available
                 
                 # Ensure we're adding integers only
-                if isinstance(api_calls_used, (int, float)):
+                if isinstance(api_calls_used, (int, float)) and api_calls_used > 0:
                     total_api_calls += int(api_calls_used)
                 else:
                     # Fallback: assume 1 API call was made
@@ -2167,21 +2172,25 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
                     # Update live results
                     with results_container.container():
                         attempt_text = f"(attempt {found_on_attempt})" if found_on_attempt > 0 else ""
-                        st.success(f"✅ Found: {result['email']} for {result['full_name']} {attempt_text}")
+                        st.success(f"✅ Found: {result['email']} for {result.get('full_name', 'Unknown')} {attempt_text}")
             else:
                 # If result is None, still count 1 API call attempt
                 total_api_calls += 1
             
-            # Update efficiency metrics
-            avg_calls_per_person = total_api_calls / (index + 1) if (index + 1) > 0 else 0
-            with efficiency_container.container():
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total API Calls", total_api_calls)
-                with col2:
-                    st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
-                with col3:
-                    st.metric("Emails Found", len(verified_emails))
+            # Update efficiency metrics (use row_num + 1 for proper calculation)
+            processed_count = row_num + 1
+            avg_calls_per_person = total_api_calls / processed_count if processed_count > 0 else 0
+            
+            # Update efficiency display every 5 rows to avoid too many updates
+            if processed_count % 5 == 0 or processed_count == total_rows:
+                with efficiency_container.container():
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total API Calls", total_api_calls)
+                    with col2:
+                        st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
+                    with col3:
+                        st.metric("Emails Found", len(verified_emails))
         
         except Exception as e:
             # Handle individual row processing errors
@@ -2189,7 +2198,7 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
             total_api_calls += 1  # Count as 1 attempt even if failed
             continue
     
-    # Complete
+    # Complete - ensure progress is exactly 1.0
     progress_bar.progress(1.0)
     status_text.text("✅ Smart verification completed!")
     
@@ -2216,23 +2225,24 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
         st.subheader("📋 Verified Emails")
         st.dataframe(results_df, use_container_width=True)
         
-        # Efficiency insights
-        st.subheader("⚡ Algorithm Efficiency")
-        attempt_counts = results_df['found_on_attempt'].value_counts().sort_index()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Emails found by attempt number:**")
-            for attempt, count in attempt_counts.items():
-                st.write(f"• Attempt {attempt}: {count} emails")
-        
-        with col2:
-            first_attempt_success = len(results_df[results_df['found_on_attempt'] == 1])
-            first_attempt_rate = (first_attempt_success / len(results_df) * 100) if len(results_df) > 0 else 0
-            st.metric("First Attempt Success", f"{first_attempt_rate:.1f}%")
+        # Efficiency insights (only show if we have results)
+        if len(results_df) > 0:
+            st.subheader("⚡ Algorithm Efficiency")
+            attempt_counts = results_df['found_on_attempt'].value_counts().sort_index()
             
-            avg_attempts = results_df['found_on_attempt'].mean()
-            st.metric("Avg Attempts to Find", f"{avg_attempts:.1f}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Emails found by attempt number:**")
+                for attempt, count in attempt_counts.items():
+                    st.write(f"• Attempt {attempt}: {count} emails")
+            
+            with col2:
+                first_attempt_success = len(results_df[results_df['found_on_attempt'] == 1])
+                first_attempt_rate = (first_attempt_success / len(results_df) * 100) if len(results_df) > 0 else 0
+                st.metric("First Attempt Success", f"{first_attempt_rate:.1f}%")
+                
+                avg_attempts = results_df['found_on_attempt'].mean()
+                st.metric("Avg Attempts to Find", f"{avg_attempts:.1f}")
         
         # Download button
         csv_buffer = io.StringIO()
@@ -2247,12 +2257,47 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
             type="primary"
         )
         
-        api_efficiency = ((total_rows * 10) - total_api_calls) / (total_rows * 10) * 100 if total_rows > 0 else 0
+        # Calculate efficiency
+        max_possible_calls = total_rows * 10  # Assuming max 10 formats per person
+        api_efficiency = ((max_possible_calls - total_api_calls) / max_possible_calls * 100) if max_possible_calls > 0 else 0
+        
         st.success(f"🎉 Smart verification found {len(verified_emails)} valid email addresses!")
         st.info(f"💡 **API Efficiency:** Used {total_api_calls} API calls total (avg {avg_calls:.1f} per person). Saved approximately {api_efficiency:.0f}% of potential API calls through early stopping.")
     else:
         st.warning("⚠️ No valid email addresses were found for the provided data.")
+        st.info(f"📊 **Processing Summary:** Processed {total_rows} rows using {total_api_calls} API calls (avg {total_api_calls/total_rows:.1f} per person)")
 
+# Additional helper function to ensure DataFrame is properly prepared
+def prepare_dataframe_for_verification(df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
+    """Prepare and clean DataFrame for verification with proper indexing."""
+    try:
+        # Create cleaned dataset with mapped columns
+        cleaned_df = pd.DataFrame({
+            'firstname': df[mapping['firstname']],
+            'lastname': df[mapping['lastname']],
+            'companyURL': df[mapping['companyURL']]
+        })
+        
+        # Clean data and reset index
+        original_rows = len(cleaned_df)
+        cleaned_df = cleaned_df.dropna().copy()
+        cleaned_df = cleaned_df[
+            (cleaned_df['firstname'].astype(str).str.strip() != '') & 
+            (cleaned_df['lastname'].astype(str).str.strip() != '') & 
+            (cleaned_df['companyURL'].astype(str).str.strip() != '')
+        ]
+        
+        # IMPORTANT: Reset index to ensure proper iteration
+        cleaned_df = cleaned_df.reset_index(drop=True)
+        
+        return cleaned_df, original_rows
+        
+    except KeyError as e:
+        st.error(f"❌ Column mapping error: {str(e)}")
+        return None, 0
+    except Exception as e:
+        st.error(f"❌ Data processing error: {str(e)}")
+        return None, 0
 # Updated main function to use the new optimized CSV upload
 def main():
     # Header
