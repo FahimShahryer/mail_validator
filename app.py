@@ -157,6 +157,25 @@ def load_custom_css():
             border-radius: 10px;
             margin: 0.5rem 0;
         }
+        
+        /* Dialog specific styles */
+        .stDialog > div {
+            background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+        }
+        
+        .stDialog h3 {
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .api-welcome {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -397,6 +416,59 @@ class DataProcessor:
         }
 
 # ========================================
+# API KEY DIALOG
+# ========================================
+
+@st.dialog("🔑 API Key Required", width="large")
+def api_key_dialog():
+    """Modal dialog for API key input."""
+    st.markdown("""
+    ### Welcome to Email Verifier Pro! 
+    
+    To get started, please enter your Reoon API key. You can get your API key from:
+    👉 **https://emailverifier.reoon.com/**
+    """)
+    
+    # API key input
+    api_key = st.text_input(
+        "Enter your Reoon API Key",
+        type="password",
+        placeholder="Enter your API key here...",
+        help="Your API key will be stored securely for this session"
+    )
+    
+    # Instructions
+    st.markdown("""
+    #### 📋 What you can do with this tool:
+    - **CSV Upload**: Verify emails for multiple people from a CSV/Excel file
+    - **Single Entry**: Verify email for individual person
+    - **Smart Algorithm**: Tests 10+ email format patterns automatically
+    - **Efficient**: Stops searching when valid email is found
+    
+    #### 📊 CSV Format Required:
+    ```csv
+    firstname,lastname,companyURL
+    John,Smith,https://company.com
+    Jane,Doe,www.example.org
+    ```
+    """)
+    
+    # Submit button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🚀 Start Email Verification", type="primary", use_container_width=True):
+            if api_key and validate_api_key(api_key):
+                st.session_state.api_key = api_key
+                st.session_state.api_key_validated = True
+                st.success("✅ API key saved successfully!")
+                time.sleep(1)  # Brief pause for user feedback
+                st.rerun()
+            elif not api_key:
+                st.error("❌ Please enter your API key")
+            else:
+                st.error("❌ Please enter a valid API key (minimum 10 characters)")
+
+# ========================================
 # UI COMPONENT RENDERERS
 # ========================================
 
@@ -405,14 +477,19 @@ class UIRenderer:
     
     @staticmethod
     def render_sidebar():
-        """Render sidebar with configuration and help."""
+        """Render sidebar with help information only."""
         with st.sidebar:
-            st.header("🔑 Configuration")
-            api_key = st.text_input(
-                "Enter your Reoon API Key",
-                type="password",
-                help="Get your API key from https://emailverifier.reoon.com/"
-            )
+            st.header("ℹ️ Help & Information")
+            
+            # Show current API key status
+            if st.session_state.get('api_key_validated', False):
+                st.success("🔑 API Key: ✅ Active")
+                if st.button("🔄 Change API Key", type="secondary"):
+                    st.session_state.api_key = None
+                    st.session_state.api_key_validated = False
+                    st.rerun()
+            else:
+                st.error("🔑 API Key: ❌ Not Set")
             
             st.markdown("---")
             st.subheader("📋 CSV Format Required")
@@ -431,21 +508,6 @@ class UIRenderer:
             """)
             
             st.markdown("---")
-            st.subheader("ℹ️ How it works")
-            st.markdown("""
-            **CSV Mode:**
-            1. Upload your CSV file
-            2. Enter your API key
-            3. Click 'Start Verification'
-            4. Download verified emails
-            
-            **Single Entry Mode:**
-            1. Enter individual details
-            2. Click 'Verify Email'
-            3. Get instant results
-            """)
-            
-            st.markdown("---")
             st.subheader("🎯 Email Patterns Tested")
             st.markdown("""
             Our algorithm tests multiple patterns:
@@ -456,7 +518,24 @@ class UIRenderer:
             - And 10+ more formats...
             """)
             
-            return api_key
+            st.markdown("---")
+            st.subheader("⚡ How it works")
+            st.markdown("""
+            **CSV Mode:**
+            1. Upload your CSV file
+            2. Click 'Start Verification'
+            3. Download verified emails
+            
+            **Single Entry Mode:**
+            1. Enter individual details
+            2. Click 'Verify Email'
+            3. Get instant results
+            """)
+            
+            st.markdown("---")
+            st.info("💡 **Tip**: The algorithm stops testing email formats as soon as it finds a valid one, saving API calls!")
+            
+            return st.session_state.get('api_key')
     
     @staticmethod
     def render_data_preview(df: pd.DataFrame, stats: Dict[str, int]):
@@ -607,17 +686,17 @@ def render_csv_upload_tab(api_key: str):
                         logger.warning(f"Failed to process domain for {row['firstname']} {row['lastname']} - {row['companyURL']}")
                         with results_container.container():
                             st.warning(f"⚠️ Invalid domain for {row['firstname']} {row['lastname']}: {row['companyURL']}")
-                        
-                        # Update efficiency metrics
-                        avg_calls_per_person = total_api_calls / (index + 1)
-                        with efficiency_container.container():
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Total API Calls", total_api_calls)
-                            with col2:
-                                st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
-                            with col3:
-                                st.metric("Emails Found", len(verified_emails))
+                    
+                    # Update efficiency metrics (moved outside the if-else block)
+                    avg_calls_per_person = total_api_calls / (index + 1) if (index + 1) > 0 else 0
+                    with efficiency_container.container():
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total API Calls", total_api_calls)
+                        with col2:
+                            st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
+                        with col3:
+                            st.metric("Emails Found", len(verified_emails))
                 
                 # Complete processing
                 progress_bar.progress(1.0)
@@ -826,6 +905,12 @@ def main():
     # Set page configuration
     st.set_page_config(**PAGE_CONFIG)
     
+    # Initialize session state
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = None
+    if 'api_key_validated' not in st.session_state:
+        st.session_state.api_key_validated = False
+    
     # Load custom CSS
     load_custom_css()
     
@@ -833,17 +918,22 @@ def main():
     st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
     
-    # Render sidebar and get API key
+    # Check if API key is set, if not show dialog
+    if not st.session_state.get('api_key_validated', False):
+        api_key_dialog()
+        return  # Don't show the rest of the app until API key is set
+    
+    # Render sidebar (now just for help/info)
     renderer = UIRenderer()
     api_key = renderer.render_sidebar()
     
-    # Validate API key
-    if not api_key:
-        st.warning("⚠️ Please enter your API key in the sidebar to continue.")
-        return
-    
-    if not validate_api_key(api_key):
-        st.error("❌ Please enter a valid API key.")
+    # Validate API key (should always be valid at this point, but double-check)
+    if not api_key or not validate_api_key(api_key):
+        st.error("❌ API key validation failed. Please refresh the page.")
+        if st.button("🔄 Reset API Key"):
+            st.session_state.api_key = None
+            st.session_state.api_key_validated = False
+            st.rerun()
         return
     
     # Main content tabs
