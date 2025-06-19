@@ -236,19 +236,42 @@ def verify_email_api(email: str, api_key: str) -> dict:
     except json.JSONDecodeError:
         return {"error": "Failed to decode API response"}
 
+# Also fix the verify_single_email function to ensure it always returns proper values
 def verify_single_email(firstname: str, lastname: str, company_url: str, api_key: str) -> Optional[dict]:
     """Verify email for a single person and return result immediately when valid email is found."""
     # Clean and parse inputs
     domain = clean_domain(company_url)
     if not domain:
-        return None
+        return {
+            'firstname': firstname,
+            'lastname': lastname,
+            'company': domain or 'unknown',
+            'email': None,
+            'status': 'invalid_domain',
+            'full_name': f"{firstname} {lastname}".strip(),
+            'formats_tested': [],
+            'total_formats_available': 0,
+            'found_on_attempt': None,
+            'error': 'Invalid domain provided'
+        }
     
     # Combine names
     full_name = f"{firstname} {lastname}".strip()
     first, middle, last = parse_name(full_name)
     
     if not first or not last:
-        return None
+        return {
+            'firstname': firstname,
+            'lastname': lastname,
+            'company': domain,
+            'email': None,
+            'status': 'invalid_names',
+            'full_name': full_name,
+            'formats_tested': [],
+            'total_formats_available': 0,
+            'found_on_attempt': None,
+            'error': 'Could not parse first and last names'
+        }
     
     # Generate email formats
     email_formats = generate_email_formats(first, middle, last, domain)
@@ -276,14 +299,14 @@ def verify_single_email(firstname: str, lastname: str, company_url: str, api_key
                         'email': email,
                         'status': status,
                         'full_name': full_name,
-                        'formats_tested': formats_tested,  # Only formats tested before finding valid one
+                        'formats_tested': formats_tested,
                         'total_formats_available': len(email_formats),
-                        'found_on_attempt': len(formats_tested),
-                        'api_result': result  # Include full API response for debugging
+                        'found_on_attempt': len(formats_tested),  # This is always an integer
+                        'api_result': result
                     }
             
             # If this format didn't work and we have more to test, add delay
-            if i < len(email_formats) - 1:  # Don't delay after the last attempt
+            if i < len(email_formats) - 1:
                 time.sleep(0.3)
                 
         except Exception as e:
@@ -299,12 +322,11 @@ def verify_single_email(firstname: str, lastname: str, company_url: str, api_key
         'email': None,
         'status': 'not_found',
         'full_name': full_name,
-        'formats_tested': formats_tested,  # All formats were tested
+        'formats_tested': formats_tested,
         'total_formats_available': len(email_formats),
-        'found_on_attempt': None,
+        'found_on_attempt': None,  # Explicitly None when not found
         'error': 'No valid email found in any format'
     }
-
 def render_csv_upload_tab(api_key: str):
     """Renders the CSV upload tab content with improved algorithm."""
     st.subheader("📁 Upload CSV File")
@@ -2089,7 +2111,7 @@ def render_optimized_csv_upload_tab(api_key: str):
             st.info("💡 Try saving your file in UTF-8 encoding or as a different format.")
 
 def run_smart_verification(df: pd.DataFrame, api_key: str):
-    """Run the smart email verification process."""
+    """Run the smart email verification process with proper error handling."""
     
     # Initialize progress tracking
     progress_bar = st.progress(0)
@@ -2107,36 +2129,51 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
         progress_bar.progress(progress)
         status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
         
-        # Verify email using the improved algorithm
-        result = verify_single_email(
-            str(row['firstname']).strip(),
-            str(row['lastname']).strip(), 
-            str(row['companyURL']).strip(),
-            api_key
-        )
-        
-        if result:
-            # Track API efficiency
-            api_calls_used = result.get('found_on_attempt', result.get('total_formats_available', 0))
-            total_api_calls += api_calls_used
+        try:
+            # Verify email using the improved algorithm
+            result = verify_single_email(
+                str(row['firstname']).strip(),
+                str(row['lastname']).strip(), 
+                str(row['companyURL']).strip(),
+                api_key
+            )
             
-            if result.get('email'):  # Valid email found
-                verified_emails.append({
-                    'firstname': result['firstname'],
-                    'lastname': result['lastname'],
-                    'company': result['company'],
-                    'email': result['email'],
-                    'status': result['status'],
-                    'found_on_attempt': result.get('found_on_attempt'),
-                    'total_formats_tested': result.get('total_formats_available')
-                })
+            if result:
+                # FIXED: Handle None values properly when tracking API efficiency
+                found_on_attempt = result.get('found_on_attempt') or 0
+                total_formats_available = result.get('total_formats_available') or 0
                 
-                # Update live results
-                with results_container.container():
-                    st.success(f"✅ Found: {result['email']} for {result['full_name']} (attempt {result.get('found_on_attempt', 'N/A')})")
+                # Use the actual attempts made, or fall back to total available
+                api_calls_used = found_on_attempt if found_on_attempt > 0 else total_formats_available
+                
+                # Ensure we're adding integers only
+                if isinstance(api_calls_used, (int, float)):
+                    total_api_calls += int(api_calls_used)
+                else:
+                    # Fallback: assume 1 API call was made
+                    total_api_calls += 1
+                
+                if result.get('email'):  # Valid email found
+                    verified_emails.append({
+                        'firstname': result['firstname'],
+                        'lastname': result['lastname'],
+                        'company': result['company'],
+                        'email': result['email'],
+                        'status': result['status'],
+                        'found_on_attempt': found_on_attempt if found_on_attempt > 0 else 1,
+                        'total_formats_tested': total_formats_available if total_formats_available > 0 else 1
+                    })
+                    
+                    # Update live results
+                    with results_container.container():
+                        attempt_text = f"(attempt {found_on_attempt})" if found_on_attempt > 0 else ""
+                        st.success(f"✅ Found: {result['email']} for {result['full_name']} {attempt_text}")
+            else:
+                # If result is None, still count 1 API call attempt
+                total_api_calls += 1
             
             # Update efficiency metrics
-            avg_calls_per_person = total_api_calls / (index + 1)
+            avg_calls_per_person = total_api_calls / (index + 1) if (index + 1) > 0 else 0
             with efficiency_container.container():
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -2145,6 +2182,12 @@ def run_smart_verification(df: pd.DataFrame, api_key: str):
                     st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
                 with col3:
                     st.metric("Emails Found", len(verified_emails))
+        
+        except Exception as e:
+            # Handle individual row processing errors
+            st.error(f"Error processing {row['firstname']} {row['lastname']}: {str(e)}")
+            total_api_calls += 1  # Count as 1 attempt even if failed
+            continue
     
     # Complete
     progress_bar.progress(1.0)
