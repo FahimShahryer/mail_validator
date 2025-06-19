@@ -479,7 +479,7 @@ class UIRenderer:
     def render_sidebar():
         """Render sidebar with help information only."""
         with st.sidebar:
-            st.header("Mail Validator")
+            st.info("Mail Validator")
             
             # Show current API key status
             if st.session_state.get('api_key_validated', False):
