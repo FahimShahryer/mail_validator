@@ -7,6 +7,17 @@ import time
 import io
 from typing import Tuple, Optional, List
 
+
+import streamlit as st
+import pandas as pd
+import requests
+import re
+import json
+import time
+import io
+from typing import Tuple, Optional, List, Dict
+from urllib.parse import urlparse, quote_plus
+
 # Set page config
 st.set_page_config(
     page_title="Email Enricher",
@@ -643,14 +654,9 @@ import random
 import traceback
 from datetime import datetime
 
-# ========================================
-# FIXED LINKEDIN SEARCH FUNCTIONS
-# Replace the previous functions with these fixed versions
-# ========================================
 
-# FIXED FUNCTION 1: googlesearch-python method
 def googlesearch_library_method(email: str) -> dict:
-    """FIXED: Use googlesearch-python library to bypass Google's anti-bot measures."""
+    
     result = {
         'email': email,
         'linkedin_url': None,
@@ -1495,11 +1501,720 @@ def render_enhanced_linkedin_tab():
                         with st.expander(f"📄 {method_name.title()} Page Sample"):
                             st.text(method_debug['page_sample'])
 
-# Main Streamlit App
+
+
+
+def analyze_column_content(df: pd.DataFrame, column: str, sample_size: int = 50) -> Dict:
+    """Analyze the content of a column to determine its likely type."""
+    if column not in df.columns:
+        return {"type": "unknown", "confidence": 0, "analysis": {}}
+    
+    # Get sample data (non-null values)
+    sample_data = df[column].dropna().astype(str).head(sample_size).tolist()
+    
+    if not sample_data:
+        return {"type": "unknown", "confidence": 0, "analysis": {"reason": "no_data"}}
+    
+    analysis = {
+        "total_samples": len(sample_data),
+        "avg_length": sum(len(str(x)) for x in sample_data) / len(sample_data),
+        "has_spaces": sum(1 for x in sample_data if ' ' in str(x)),
+        "has_dots": sum(1 for x in sample_data if '.' in str(x)),
+        "has_at_symbol": sum(1 for x in sample_data if '@' in str(x)),
+        "has_http": sum(1 for x in sample_data if str(x).lower().startswith(('http', 'www'))),
+        "has_common_tlds": sum(1 for x in sample_data if any(tld in str(x).lower() for tld in ['.com', '.org', '.net', '.io', '.co', '.gov', '.edu'])),
+        "numeric_count": sum(1 for x in sample_data if str(x).replace('.', '').replace('-', '').isdigit()),
+        "single_words": sum(1 for x in sample_data if len(str(x).split()) == 1),
+        "multiple_words": sum(1 for x in sample_data if len(str(x).split()) > 1)
+    }
+    
+    # Calculate percentages
+    total = len(sample_data)
+    percentages = {k: (v / total * 100) if total > 0 else 0 for k, v in analysis.items() if isinstance(v, (int, float))}
+    
+    # Determine column type based on content analysis
+    confidence = 0
+    column_type = "unknown"
+    
+    # URL/Website detection
+    if (percentages["has_common_tlds"] > 60 or 
+        percentages["has_http"] > 30 or 
+        percentages["has_dots"] > 70):
+        column_type = "url"
+        confidence = min(90, percentages["has_common_tlds"] + percentages["has_http"])
+    
+    # Email detection
+    elif percentages["has_at_symbol"] > 70:
+        column_type = "email"
+        confidence = min(95, percentages["has_at_symbol"])
+    
+    # First/Last name detection
+    elif (percentages["single_words"] > 70 and 
+          percentages["avg_length"] < 15 and 
+          percentages["has_spaces"] < 20):
+        column_type = "name"
+        confidence = 70
+    
+    # Full name detection
+    elif (percentages["multiple_words"] > 50 and 
+          percentages["has_spaces"] > 40 and 
+          percentages["avg_length"] > 8):
+        column_type = "full_name"
+        confidence = 75
+    
+    # Phone number detection
+    elif (percentages["numeric_count"] > 60 or 
+          analysis["avg_length"] > 10):
+        column_type = "phone"
+        confidence = 60
+    
+    return {
+        "type": column_type,
+        "confidence": confidence,
+        "analysis": analysis,
+        "percentages": percentages,
+        "sample_values": sample_data[:5]
+    }
+
+def smart_column_detection(df: pd.DataFrame) -> Dict[str, Dict]:
+    """Smart detection of firstname, lastname, and company URL columns."""
+    
+    results = {
+        "firstname": {"column": None, "confidence": 0, "candidates": []},
+        "lastname": {"column": None, "confidence": 0, "candidates": []},
+        "company_url": {"column": None, "confidence": 0, "candidates": []},
+        "email": {"column": None, "confidence": 0, "candidates": []},
+        "full_name": {"column": None, "confidence": 0, "candidates": []}
+    }
+    
+    # Define column name patterns
+    firstname_patterns = [
+        r'^(first|fname|firstname|first_name|given|given_name|forename)$',
+        r'^f_?name$',
+        r'^(prenom|nome|vorname)$',  # International
+        r'first'
+    ]
+    
+    lastname_patterns = [
+        r'^(last|lname|lastname|last_name|surname|family|family_name)$',
+        r'^l_?name$',
+        r'^(nom|apellido|nachname)$',  # International
+        r'last|surname'
+    ]
+    
+    url_patterns = [
+        r'^(url|website|site|domain|company_?url|company_?website)$',
+        r'^(web|link|homepage|www)$',
+        r'(company|corp|business).*(url|site|web)',
+        r'website|domain|url'
+    ]
+    
+    email_patterns = [
+        r'^(email|mail|e_?mail|email_?address)$',
+        r'mail|email'
+    ]
+    
+    fullname_patterns = [
+        r'^(name|full_?name|complete_?name|contact_?name)$',
+        r'^(nome_completo|nom_complet|vollstandiger_name)$',  # International
+        r'full.*name|complete.*name'
+    ]
+    
+    # Analyze each column
+    for column in df.columns:
+        column_lower = column.lower().strip()
+        content_analysis = analyze_column_content(df, column)
+        
+        # Check firstname patterns
+        firstname_score = 0
+        for pattern in firstname_patterns:
+            if re.search(pattern, column_lower, re.IGNORECASE):
+                firstname_score = 90 if re.match(pattern.replace('$', '').replace('^', ''), column_lower) else 70
+                break
+        
+        # Boost score if content looks like single names
+        if content_analysis["type"] == "name":
+            firstname_score = max(firstname_score, content_analysis["confidence"])
+        
+        if firstname_score > 0:
+            results["firstname"]["candidates"].append({
+                "column": column,
+                "score": firstname_score,
+                "reason": f"Pattern match + content analysis",
+                "content_type": content_analysis["type"]
+            })
+        
+        # Check lastname patterns
+        lastname_score = 0
+        for pattern in lastname_patterns:
+            if re.search(pattern, column_lower, re.IGNORECASE):
+                lastname_score = 90 if re.match(pattern.replace('$', '').replace('^', ''), column_lower) else 70
+                break
+        
+        if content_analysis["type"] == "name":
+            lastname_score = max(lastname_score, content_analysis["confidence"])
+        
+        if lastname_score > 0:
+            results["lastname"]["candidates"].append({
+                "column": column,
+                "score": lastname_score,
+                "reason": f"Pattern match + content analysis",
+                "content_type": content_analysis["type"]
+            })
+        
+        # Check URL patterns
+        url_score = 0
+        for pattern in url_patterns:
+            if re.search(pattern, column_lower, re.IGNORECASE):
+                url_score = 90 if re.match(pattern.replace('$', '').replace('^', ''), column_lower) else 70
+                break
+        
+        if content_analysis["type"] == "url":
+            url_score = max(url_score, content_analysis["confidence"])
+        
+        if url_score > 0:
+            results["company_url"]["candidates"].append({
+                "column": column,
+                "score": url_score,
+                "reason": f"Pattern match + content analysis",
+                "content_type": content_analysis["type"]
+            })
+        
+        # Check email patterns
+        email_score = 0
+        for pattern in email_patterns:
+            if re.search(pattern, column_lower, re.IGNORECASE):
+                email_score = 90 if re.match(pattern.replace('$', '').replace('^', ''), column_lower) else 70
+                break
+        
+        if content_analysis["type"] == "email":
+            email_score = max(email_score, content_analysis["confidence"])
+        
+        if email_score > 0:
+            results["email"]["candidates"].append({
+                "column": column,
+                "score": email_score,
+                "reason": f"Pattern match + content analysis",
+                "content_type": content_analysis["type"]
+            })
+        
+        # Check full name patterns
+        fullname_score = 0
+        for pattern in fullname_patterns:
+            if re.search(pattern, column_lower, re.IGNORECASE):
+                fullname_score = 90 if re.match(pattern.replace('$', '').replace('^', ''), column_lower) else 70
+                break
+        
+        if content_analysis["type"] == "full_name":
+            fullname_score = max(fullname_score, content_analysis["confidence"])
+        
+        if fullname_score > 0:
+            results["full_name"]["candidates"].append({
+                "column": column,
+                "score": fullname_score,
+                "reason": f"Pattern match + content analysis",
+                "content_type": content_analysis["type"]
+            })
+    
+    # Sort candidates by score and pick the best ones
+    for field_type in results:
+        if results[field_type]["candidates"]:
+            results[field_type]["candidates"].sort(key=lambda x: x["score"], reverse=True)
+            best_candidate = results[field_type]["candidates"][0]
+            results[field_type]["column"] = best_candidate["column"]
+            results[field_type]["confidence"] = best_candidate["score"]
+    
+    return results
+
+def render_column_confirmation_dialog(df: pd.DataFrame, detection_results: Dict) -> Dict[str, str]:
+    """Render confirmation dialog for column detection."""
+    
+    st.subheader("🔍 Smart Column Detection Results")
+    
+    # Show detection confidence
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        firstname_confidence = detection_results["firstname"]["confidence"]
+        if firstname_confidence > 70:
+            st.success(f"✅ First Name: {firstname_confidence:.0f}% confident")
+        elif firstname_confidence > 40:
+            st.warning(f"⚠️ First Name: {firstname_confidence:.0f}% confident")
+        else:
+            st.error("❌ First Name: Not detected")
+    
+    with col2:
+        lastname_confidence = detection_results["lastname"]["confidence"]
+        if lastname_confidence > 70:
+            st.success(f"✅ Last Name: {lastname_confidence:.0f}% confident")
+        elif lastname_confidence > 40:
+            st.warning(f"⚠️ Last Name: {lastname_confidence:.0f}% confident")
+        else:
+            st.error("❌ Last Name: Not detected")
+    
+    with col3:
+        url_confidence = detection_results["company_url"]["confidence"]
+        if url_confidence > 70:
+            st.success(f"✅ Company URL: {url_confidence:.0f}% confident")
+        elif url_confidence > 40:
+            st.warning(f"⚠️ Company URL: {url_confidence:.0f}% confident")
+        else:
+            st.error("❌ Company URL: Not detected")
+    
+    # Show recommendations
+    st.subheader("🎯 Recommended Column Mapping")
+    
+    recommendations = {}
+    
+    # Get recommended columns
+    recommended_firstname = detection_results["firstname"]["column"]
+    recommended_lastname = detection_results["lastname"]["column"]
+    recommended_url = detection_results["company_url"]["column"]
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if recommended_firstname:
+            st.info(f"**First Name:** `{recommended_firstname}`")
+            sample_values = df[recommended_firstname].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+        else:
+            st.error("**First Name:** Not detected")
+    
+    with col2:
+        if recommended_lastname:
+            st.info(f"**Last Name:** `{recommended_lastname}`")
+            sample_values = df[recommended_lastname].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+        else:
+            st.error("**Last Name:** Not detected")
+    
+    with col3:
+        if recommended_url:
+            st.info(f"**Company URL:** `{recommended_url}`")
+            sample_values = df[recommended_url].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+        else:
+            st.error("**Company URL:** Not detected")
+    
+    # Show detection details
+    with st.expander("🔍 View Detection Details"):
+        for field_type, result in detection_results.items():
+            if result["candidates"]:
+                st.write(f"**{field_type.replace('_', ' ').title()} Candidates:**")
+                for i, candidate in enumerate(result["candidates"][:3]):  # Show top 3
+                    confidence_emoji = "🟢" if candidate["score"] > 70 else "🟡" if candidate["score"] > 40 else "🔴"
+                    st.write(f"{confidence_emoji} `{candidate['column']}` - {candidate['score']:.0f}% ({candidate['reason']})")
+    
+    # Confirmation buttons
+    st.subheader("✅ Confirm Column Mapping")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        accept_recommendations = st.button(
+            "✅ Accept Recommendations", 
+            type="primary",
+            disabled=not all([recommended_firstname, recommended_lastname, recommended_url]),
+            help="Use the automatically detected columns"
+        )
+    
+    with col2:
+        manual_selection = st.button(
+            "🔧 Manual Selection", 
+            type="secondary",
+            help="Choose columns manually"
+        )
+    
+    # Handle user choice
+    if accept_recommendations:
+        recommendations = {
+            'firstname': recommended_firstname,
+            'lastname': recommended_lastname,
+            'companyURL': recommended_url,
+            'method': 'automatic'
+        }
+        st.session_state['column_mapping'] = recommendations
+        st.session_state['mapping_confirmed'] = True
+        st.rerun()
+    
+    elif manual_selection:
+        st.session_state['show_manual_selection'] = True
+        st.rerun()
+    
+    return recommendations
+
+def render_manual_column_selection(df: pd.DataFrame) -> Dict[str, str]:
+    """Render manual column selection interface."""
+    
+    st.subheader("🔧 Manual Column Selection")
+    st.info("Please select the correct columns for each field:")
+    
+    available_columns = [""] + list(df.columns)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        firstname_col = st.selectbox(
+            "First Name Column",
+            available_columns,
+            help="Select the column containing first names"
+        )
+        if firstname_col:
+            sample_values = df[firstname_col].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+    
+    with col2:
+        lastname_col = st.selectbox(
+            "Last Name Column",
+            available_columns,
+            help="Select the column containing last names"
+        )
+        if lastname_col:
+            sample_values = df[lastname_col].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+    
+    with col3:
+        url_col = st.selectbox(
+            "Company URL Column",
+            available_columns,
+            help="Select the column containing company URLs/websites"
+        )
+        if url_col:
+            sample_values = df[url_col].dropna().head(3).tolist()
+            st.caption(f"Sample: {', '.join(map(str, sample_values))}")
+    
+    # Validation and confirmation
+    all_selected = firstname_col and lastname_col and url_col
+    
+    if all_selected:
+        # Check for duplicate selections
+        selected_cols = [firstname_col, lastname_col, url_col]
+        if len(set(selected_cols)) != len(selected_cols):
+            st.error("❌ Please select different columns for each field")
+            return {}
+        
+        st.success("✅ All columns selected!")
+        
+        if st.button("Confirm Manual Selection", type="primary"):
+            mapping = {
+                'firstname': firstname_col,
+                'lastname': lastname_col,
+                'companyURL': url_col,
+                'method': 'manual'
+            }
+            st.session_state['column_mapping'] = mapping
+            st.session_state['mapping_confirmed'] = True
+            st.session_state['show_manual_selection'] = False
+            st.rerun()
+    else:
+        st.warning("⚠️ Please select all required columns")
+    
+    # Back button
+    if st.button("← Back to Recommendations"):
+        st.session_state['show_manual_selection'] = False
+        st.rerun()
+    
+    return {}
+
+def render_optimized_csv_upload_tab(api_key: str):
+    """Optimized CSV upload with smart column detection."""
+    
+    st.subheader("📁 Smart CSV Upload & Column Detection")
+    
+    # Initialize session state
+    if 'column_mapping' not in st.session_state:
+        st.session_state['column_mapping'] = None
+    if 'mapping_confirmed' not in st.session_state:
+        st.session_state['mapping_confirmed'] = False
+    if 'show_manual_selection' not in st.session_state:
+        st.session_state['show_manual_selection'] = False
+    if 'uploaded_df' not in st.session_state:
+        st.session_state['uploaded_df'] = None
+    
+    # File upload
+    uploaded_file = st.file_uploader(
+        "Choose a CSV or Excel file",
+        type=['csv', 'xlsx'],
+        help="Upload any CSV or Excel file - our smart algorithm will detect the correct columns!"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read file
+            if uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file)
+            else:
+                # Try different encodings for CSV
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        df = pd.read_csv(uploaded_file, encoding='latin-1')
+                    except UnicodeDecodeError:
+                        df = pd.read_csv(uploaded_file, encoding='cp1252')
+            
+            st.session_state['uploaded_df'] = df
+            
+            # Show basic file info
+            st.subheader("📊 File Information")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Rows", len(df))
+            with col2:
+                st.metric("Total Columns", len(df.columns))
+            with col3:
+                st.metric("File Size", f"{uploaded_file.size / 1024:.1f} KB")
+            with col4:
+                st.metric("Null Values", df.isnull().sum().sum())
+            
+            # Show column preview
+            st.subheader("📋 Column Preview")
+            preview_data = []
+            for col in df.columns:
+                sample_values = df[col].dropna().head(3).tolist()
+                null_count = df[col].isnull().sum()
+                null_percentage = (null_count / len(df)) * 100
+                
+                preview_data.append({
+                    "Column Name": col,
+                    "Data Type": str(df[col].dtype),
+                    "Sample Values": ", ".join(map(str, sample_values)),
+                    "Null Count": null_count,
+                    "Null %": f"{null_percentage:.1f}%"
+                })
+            
+            preview_df = pd.DataFrame(preview_data)
+            st.dataframe(preview_df, use_container_width=True)
+            
+            # Reset mapping when new file is uploaded
+            if st.session_state.get('last_file_name') != uploaded_file.name:
+                st.session_state['column_mapping'] = None
+                st.session_state['mapping_confirmed'] = False
+                st.session_state['show_manual_selection'] = False
+                st.session_state['last_file_name'] = uploaded_file.name
+            
+            # Smart column detection
+            if not st.session_state['mapping_confirmed']:
+                if not st.session_state.get('show_manual_selection', False):
+                    # Run smart detection
+                    with st.spinner("🔍 Analyzing columns and content..."):
+                        detection_results = smart_column_detection(df)
+                    
+                    # Show confirmation dialog
+                    render_column_confirmation_dialog(df, detection_results)
+                else:
+                    # Show manual selection
+                    render_manual_column_selection(df)
+            
+            # Process data if mapping is confirmed
+            if st.session_state['mapping_confirmed'] and st.session_state['column_mapping']:
+                mapping = st.session_state['column_mapping']
+                
+                # Show confirmed mapping
+                st.subheader("✅ Confirmed Column Mapping")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.success(f"**First Name:** `{mapping['firstname']}`")
+                with col2:
+                    st.success(f"**Last Name:** `{mapping['lastname']}`")
+                with col3:
+                    st.success(f"**Company URL:** `{mapping['companyURL']}`")
+                with col4:
+                    method_emoji = "🤖" if mapping['method'] == 'automatic' else "👤"
+                    st.info(f"**Method:** {method_emoji} {mapping['method'].title()}")
+                
+                # Change mapping button
+                if st.button("🔄 Change Column Mapping"):
+                    st.session_state['mapping_confirmed'] = False
+                    st.session_state['column_mapping'] = None
+                    st.rerun()
+                
+                # Create cleaned dataset
+                try:
+                    # Map columns to standard names
+                    cleaned_df = pd.DataFrame({
+                        'firstname': df[mapping['firstname']],
+                        'lastname': df[mapping['lastname']],
+                        'companyURL': df[mapping['companyURL']]
+                    })
+                    
+                    # Clean data
+                    original_rows = len(cleaned_df)
+                    cleaned_df = cleaned_df.dropna().copy()
+                    cleaned_df = cleaned_df[
+                        (cleaned_df['firstname'].astype(str).str.strip() != '') & 
+                        (cleaned_df['lastname'].astype(str).str.strip() != '') & 
+                        (cleaned_df['companyURL'].astype(str).str.strip() != '')
+                    ]
+                    
+                    st.subheader("📊 Data Quality Analysis")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Original Rows", original_rows)
+                    with col2:
+                        st.metric("Valid Rows", len(cleaned_df))
+                    with col3:
+                        st.metric("Removed Rows", original_rows - len(cleaned_df))
+                    with col4:
+                        data_quality = (len(cleaned_df) / original_rows * 100) if original_rows > 0 else 0
+                        st.metric("Data Quality", f"{data_quality:.1f}%")
+                    
+                    if len(cleaned_df) == 0:
+                        st.error("❌ No valid rows found after cleaning. Please check your data quality.")
+                        return
+                    
+                    # Show sample of cleaned data
+                    st.subheader("📋 Cleaned Data Preview")
+                    st.dataframe(cleaned_df.head(10), use_container_width=True)
+                    
+                    # Verification section
+                    st.subheader("🚀 Email Verification")
+                    
+                    if st.button("Start Smart Verification", type="primary", key="smart_csv_verify"):
+                        # Run the verification with the cleaned dataset
+                        run_smart_verification(cleaned_df, api_key)
+                
+                except KeyError as e:
+                    st.error(f"❌ Column mapping error: {str(e)}")
+                    st.session_state['mapping_confirmed'] = False
+                except Exception as e:
+                    st.error(f"❌ Data processing error: {str(e)}")
+        
+        except Exception as e:
+            st.error(f"❌ Error reading file: {str(e)}")
+            st.info("💡 Try saving your file in UTF-8 encoding or as a different format.")
+
+def run_smart_verification(df: pd.DataFrame, api_key: str):
+    """Run the smart email verification process."""
+    
+    # Initialize progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    results_container = st.empty()
+    efficiency_container = st.empty()
+    
+    verified_emails = []
+    total_rows = len(df)
+    total_api_calls = 0
+    
+    # Process each row
+    for index, row in df.iterrows():
+        progress = (index + 1) / total_rows
+        progress_bar.progress(progress)
+        status_text.text(f"Processing {index + 1}/{total_rows}: {row['firstname']} {row['lastname']}")
+        
+        # Verify email using the improved algorithm
+        result = verify_single_email(
+            str(row['firstname']).strip(),
+            str(row['lastname']).strip(), 
+            str(row['companyURL']).strip(),
+            api_key
+        )
+        
+        if result:
+            # Track API efficiency
+            api_calls_used = result.get('found_on_attempt', result.get('total_formats_available', 0))
+            total_api_calls += api_calls_used
+            
+            if result.get('email'):  # Valid email found
+                verified_emails.append({
+                    'firstname': result['firstname'],
+                    'lastname': result['lastname'],
+                    'company': result['company'],
+                    'email': result['email'],
+                    'status': result['status'],
+                    'found_on_attempt': result.get('found_on_attempt'),
+                    'total_formats_tested': result.get('total_formats_available')
+                })
+                
+                # Update live results
+                with results_container.container():
+                    st.success(f"✅ Found: {result['email']} for {result['full_name']} (attempt {result.get('found_on_attempt', 'N/A')})")
+            
+            # Update efficiency metrics
+            avg_calls_per_person = total_api_calls / (index + 1)
+            with efficiency_container.container():
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total API Calls", total_api_calls)
+                with col2:
+                    st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
+                with col3:
+                    st.metric("Emails Found", len(verified_emails))
+    
+    # Complete
+    progress_bar.progress(1.0)
+    status_text.text("✅ Smart verification completed!")
+    
+    # Final results
+    st.subheader("📈 Smart Verification Results")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Processed", total_rows)
+    with col2:
+        st.metric("Emails Found", len(verified_emails))
+    with col3:
+        success_rate = (len(verified_emails) / total_rows * 100) if total_rows > 0 else 0
+        st.metric("Success Rate", f"{success_rate:.1f}%")
+    with col4:
+        avg_calls = total_api_calls / total_rows if total_rows > 0 else 0
+        st.metric("Avg API Calls", f"{avg_calls:.1f}")
+    
+    if verified_emails:
+        # Create results DataFrame
+        results_df = pd.DataFrame(verified_emails)
+        results_df = results_df[['firstname', 'lastname', 'company', 'email', 'status', 'found_on_attempt']]
+        
+        st.subheader("📋 Verified Emails")
+        st.dataframe(results_df, use_container_width=True)
+        
+        # Efficiency insights
+        st.subheader("⚡ Algorithm Efficiency")
+        attempt_counts = results_df['found_on_attempt'].value_counts().sort_index()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Emails found by attempt number:**")
+            for attempt, count in attempt_counts.items():
+                st.write(f"• Attempt {attempt}: {count} emails")
+        
+        with col2:
+            first_attempt_success = len(results_df[results_df['found_on_attempt'] == 1])
+            first_attempt_rate = (first_attempt_success / len(results_df) * 100) if len(results_df) > 0 else 0
+            st.metric("First Attempt Success", f"{first_attempt_rate:.1f}%")
+            
+            avg_attempts = results_df['found_on_attempt'].mean()
+            st.metric("Avg Attempts to Find", f"{avg_attempts:.1f}")
+        
+        # Download button
+        csv_buffer = io.StringIO()
+        results_df.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+        
+        st.download_button(
+            label="📥 Download Verified Emails CSV",
+            data=csv_data,
+            file_name=f"smart_verified_emails_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            type="primary"
+        )
+        
+        api_efficiency = ((total_rows * 10) - total_api_calls) / (total_rows * 10) * 100 if total_rows > 0 else 0
+        st.success(f"🎉 Smart verification found {len(verified_emails)} valid email addresses!")
+        st.info(f"💡 **API Efficiency:** Used {total_api_calls} API calls total (avg {avg_calls:.1f} per person). Saved approximately {api_efficiency:.0f}% of potential API calls through early stopping.")
+    else:
+        st.warning("⚠️ No valid email addresses were found for the provided data.")
+
+# Updated main function to use the new optimized CSV upload
 def main():
     # Header
-    # st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
-    # st.markdown('<p class="sub-header">Professional email verification made simple and efficient</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📧 Email Verifier Pro</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Professional email verification with smart column detection</p>', unsafe_allow_html=True)
     
     # Sidebar for API key
     with st.sidebar:
@@ -1511,45 +2226,34 @@ def main():
         )
         
         st.markdown("---")
-        st.subheader("📋 CSV Format Required")
+        st.subheader("🤖 Smart Features")
         st.markdown("""
-        Your CSV file should contain these columns:
-        - **firstname**: First name
-        - **lastname**: Last name  
-        - **companyURL**: Company website URL
-        
-        Example:
-        ```
-        firstname,lastname,companyURL
-        John,Smith,https://company.com
-        Jane,Doe,www.example.org
-        ```
+        **New in this version:**
+        - 🔍 **Smart Column Detection** - Automatically detects firstname, lastname, and URL columns
+        - 📊 **Content Analysis** - Analyzes data types and patterns
+        - ✅ **Confirmation Dialog** - Review and confirm detected columns
+        - 🔧 **Manual Override** - Choose columns manually if needed
+        - ⚡ **Early Stopping** - Stops when valid email found (saves API calls)
         """)
         
         st.markdown("---")
-        st.subheader("ℹ️ How it works")
+        st.subheader("📋 Supported Column Names")
         st.markdown("""
-        **CSV Mode:**
-        1. Upload your CSV file
-        2. Enter your API key
-        3. Click 'Start Verification'
-        4. Download verified emails
+        **First Name:** firstname, fname, first, given, prenom, nome, vorname
         
-        **Single Entry Mode:**
-        1. Enter individual details
-        2. Click 'Verify Email'
-        3. Get instant results
+        **Last Name:** lastname, lname, last, surname, family, nom, apellido
+        
+        **Company URL:** url, website, site, domain, company_url, web, link
         """)
         
         st.markdown("---")
-        st.subheader("🎯 Email Patterns Tested")
+        st.subheader("🎯 Algorithm Features")
         st.markdown("""
-        Our algorithm tests multiple patterns:
-        - firstname.lastname@domain.com
-        - firstname@domain.com
-        - f.lastname@domain.com
-        - flastname@domain.com
-        - And 10+ more formats...
+        - Tests 14+ email format patterns
+        - Stops immediately when valid email found
+        - Tracks API efficiency metrics
+        - Handles messy/inconsistent data
+        - Multi-language column support
         """)
     
     # Main content area
@@ -1557,17 +2261,28 @@ def main():
         st.warning("⚠️ Please enter your API key in the sidebar to continue.")
         return
     
-    # Updated tab structure with enhanced LinkedIn finder
-    tab1, tab2, tab3 = st.tabs(["📁 CSV Upload", "👤 Single Entry", "🔍 Enhanced LinkedIn"])
+    # Updated tab structure with smart CSV upload
+    tab1, tab2, tab3 = st.tabs(["🤖 Smart CSV Upload", "👤 Single Entry", "🔍 Enhanced LinkedIn"])
     
     with tab1:
-        render_csv_upload_tab(api_key)
+        render_optimized_csv_upload_tab(api_key)
     
     with tab2:
+        # Note: render_single_entry_tab function should be imported from your existing code
         render_single_entry_tab(api_key)
     
     with tab3:
-        render_enhanced_linkedin_tab()  # No API key needed
+        # Note: render_enhanced_linkedin_tab function should be imported from your existing code
+        render_enhanced_linkedin_tab()
+
+# Note: The following functions need to be imported from your existing codebase:
+# - verify_single_email()
+# - render_single_entry_tab()  
+# - render_enhanced_linkedin_tab()
+# - clean_domain()
+# - parse_name()
+# - generate_email_formats()
+# - verify_email_api()
 
 if __name__ == "__main__":
     main()
