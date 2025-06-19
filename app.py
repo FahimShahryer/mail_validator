@@ -347,7 +347,7 @@ class EmailVerifier:
             'full_name': full_name,
             'formats_tested': formats_tested,
             'total_formats_available': len(email_formats),
-            'found_on_attempt': None,
+            'found_on_attempt': len(email_formats),  # Used all attempts
             'error': 'No valid email found in any format'
         }
 
@@ -579,9 +579,13 @@ def render_csv_upload_tab(api_key: str):
                         str(row['companyURL']).strip()
                     )
                     
-                    if result:
-                        # Track API efficiency
-                        api_calls_used = result.get('found_on_attempt', result.get('total_formats_available', 0))
+                    if result is not None:
+                        # Track API efficiency - ensure we always have valid integers
+                        found_attempt = result.get('found_on_attempt', 0)
+                        total_formats = result.get('total_formats_available', 0)
+                        
+                        # Use the actual attempts made (found_attempt or total if not found)
+                        api_calls_used = found_attempt if found_attempt > 0 else total_formats
                         total_api_calls += api_calls_used
                         
                         if result.get('email'):  # Valid email found
@@ -591,13 +595,18 @@ def render_csv_upload_tab(api_key: str):
                                 'company': result['company'],
                                 'email': result['email'],
                                 'status': result['status'],
-                                'found_on_attempt': result.get('found_on_attempt'),
-                                'total_formats_tested': result.get('total_formats_available')
+                                'found_on_attempt': result.get('found_on_attempt', 0),
+                                'total_formats_tested': result.get('total_formats_available', 0)
                             })
                             
                             # Update live results
                             with results_container.container():
                                 st.success(f"✅ Found: {result['email']} for {result['full_name']} (attempt {result.get('found_on_attempt', 'N/A')})")
+                    else:
+                        # Handle case where domain parsing failed
+                        logger.warning(f"Failed to process domain for {row['firstname']} {row['lastname']} - {row['companyURL']}")
+                        with results_container.container():
+                            st.warning(f"⚠️ Invalid domain for {row['firstname']} {row['lastname']}: {row['companyURL']}")
                         
                         # Update efficiency metrics
                         avg_calls_per_person = total_api_calls / (index + 1)
@@ -742,8 +751,11 @@ def render_single_entry_tab(api_key: str):
             with col2:
                 st.metric("Total Formats Available", result.get('total_formats_available', 'N/A'))
             with col3:
-                if result.get('total_formats_available') and result.get('found_on_attempt'):
-                    efficiency = ((result.get('total_formats_available', 1) - result.get('found_on_attempt', 1)) / result.get('total_formats_available', 1)) * 100
+                total_formats = result.get('total_formats_available', 0)
+                found_attempt = result.get('found_on_attempt', 0)
+                
+                if total_formats > 0 and found_attempt > 0:
+                    efficiency = ((total_formats - found_attempt) / total_formats) * 100
                     st.metric("API Calls Saved", f"{efficiency:.0f}%")
                 else:
                     st.metric("API Calls Saved", "N/A")
@@ -768,8 +780,8 @@ def render_single_entry_tab(api_key: str):
                 'company': result['company'],
                 'email': result['email'],
                 'status': result['status'],
-                'found_on_attempt': result.get('found_on_attempt'),
-                'api_calls_saved': result.get('total_formats_available', 0) - result.get('found_on_attempt', 0)
+                'found_on_attempt': result.get('found_on_attempt', 0),
+                'api_calls_saved': max(0, result.get('total_formats_available', 0) - result.get('found_on_attempt', 0))
             }])
             
             csv_buffer = io.StringIO()
