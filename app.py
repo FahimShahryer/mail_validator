@@ -226,7 +226,7 @@ def verify_email_api(email: str, api_key: str) -> dict:
         return {"error": "Failed to decode API response"}
 
 def verify_single_email(firstname: str, lastname: str, company_url: str, api_key: str) -> Optional[dict]:
-    """Verify email for a single person and return result if valid."""
+    """Verify email for a single person and return result immediately when valid email is found."""
     # Clean and parse inputs
     domain = clean_domain(company_url)
     if not domain:
@@ -242,32 +242,60 @@ def verify_single_email(firstname: str, lastname: str, company_url: str, api_key
     # Generate email formats
     email_formats = generate_email_formats(first, middle, last, domain)
     
-    # Test each format
+    # Track which formats were actually tested
+    formats_tested = []
     forbidden_statuses = ["invalid", "disabled", "unknown"]
     
-    for email in email_formats:
-        result = verify_email_api(email, api_key)
+    # Test each format until we find a valid one
+    for i, email in enumerate(email_formats):
+        formats_tested.append(email)
         
-        if result and 'error' not in result:
-            status = result.get("status", "unknown")
-            if status not in forbidden_statuses:
-                return {
-                    'firstname': firstname,
-                    'lastname': lastname,
-                    'company': domain,
-                    'email': email,
-                    'status': status,
-                    'full_name': full_name,
-                    'all_formats_tested': email_formats
-                }
-        
-        # Small delay to avoid rate limiting
-        time.sleep(0.3)
+        try:
+            result = verify_email_api(email, api_key)
+            
+            if result and 'error' not in result:
+                status = result.get("status", "unknown")
+                
+                # If status is valid (not in forbidden list), return immediately
+                if status not in forbidden_statuses:
+                    return {
+                        'firstname': firstname,
+                        'lastname': lastname,
+                        'company': domain,
+                        'email': email,
+                        'status': status,
+                        'full_name': full_name,
+                        'formats_tested': formats_tested,  # Only formats tested before finding valid one
+                        'total_formats_available': len(email_formats),
+                        'found_on_attempt': len(formats_tested),
+                        'api_result': result  # Include full API response for debugging
+                    }
+            
+            # If this format didn't work and we have more to test, add delay
+            if i < len(email_formats) - 1:  # Don't delay after the last attempt
+                time.sleep(0.3)
+                
+        except Exception as e:
+            # Log API error but continue with next format
+            print(f"API error for {email}: {str(e)}")
+            continue
     
-    return None
+    # No valid email found after testing all formats
+    return {
+        'firstname': firstname,
+        'lastname': lastname,
+        'company': domain,
+        'email': None,
+        'status': 'not_found',
+        'full_name': full_name,
+        'formats_tested': formats_tested,  # All formats were tested
+        'total_formats_available': len(email_formats),
+        'found_on_attempt': None,
+        'error': 'No valid email found in any format'
+    }
 
 def render_csv_upload_tab(api_key: str):
-    """Renders the CSV upload tab content."""
+    """Renders the CSV upload tab content with improved algorithm."""
     st.subheader("📁 Upload CSV File")
     uploaded_file = st.file_uploader(
         "Choose a CSV or Excel file",
@@ -328,9 +356,11 @@ def render_csv_upload_tab(api_key: str):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 results_container = st.empty()
+                efficiency_container = st.empty()
                 
                 verified_emails = []
                 total_rows = len(df_clean)
+                total_api_calls = 0
                 
                 # Process each row
                 for index, row in df_clean.iterrows():
@@ -347,11 +377,35 @@ def render_csv_upload_tab(api_key: str):
                     )
                     
                     if result:
-                        verified_emails.append(result)
+                        # Track API efficiency
+                        api_calls_used = result.get('found_on_attempt', result.get('total_formats_available', 0))
+                        total_api_calls += api_calls_used
                         
-                        # Update live results
-                        with results_container.container():
-                            st.success(f"✅ Found: {result['email']} for {result['full_name']}")
+                        if result.get('email'):  # Valid email found
+                            verified_emails.append({
+                                'firstname': result['firstname'],
+                                'lastname': result['lastname'],
+                                'company': result['company'],
+                                'email': result['email'],
+                                'status': result['status'],
+                                'found_on_attempt': result.get('found_on_attempt'),
+                                'total_formats_tested': result.get('total_formats_available')
+                            })
+                            
+                            # Update live results
+                            with results_container.container():
+                                st.success(f"✅ Found: {result['email']} for {result['full_name']} (attempt {result.get('found_on_attempt', 'N/A')})")
+                        
+                        # Update efficiency metrics
+                        avg_calls_per_person = total_api_calls / (index + 1)
+                        with efficiency_container.container():
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total API Calls", total_api_calls)
+                            with col2:
+                                st.metric("Avg Calls/Person", f"{avg_calls_per_person:.1f}")
+                            with col3:
+                                st.metric("Emails Found", len(verified_emails))
                 
                 # Complete
                 progress_bar.progress(1.0)
@@ -360,7 +414,7 @@ def render_csv_upload_tab(api_key: str):
                 # Results
                 st.subheader("📈 Verification Results")
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Total Processed", total_rows)
                 with col2:
@@ -368,14 +422,35 @@ def render_csv_upload_tab(api_key: str):
                 with col3:
                     success_rate = (len(verified_emails) / total_rows * 100) if total_rows > 0 else 0
                     st.metric("Success Rate", f"{success_rate:.1f}%")
+                with col4:
+                    avg_calls = total_api_calls / total_rows if total_rows > 0 else 0
+                    st.metric("Avg API Calls", f"{avg_calls:.1f}")
                 
                 if verified_emails:
                     # Create results DataFrame
                     results_df = pd.DataFrame(verified_emails)
-                    results_df = results_df[['firstname', 'lastname', 'company', 'email', 'status']]
+                    results_df = results_df[['firstname', 'lastname', 'company', 'email', 'status', 'found_on_attempt']]
                     
                     st.subheader("📋 Verified Emails")
                     st.dataframe(results_df, use_container_width=True)
+                    
+                    # Efficiency insights
+                    st.subheader("⚡ Algorithm Efficiency")
+                    attempt_counts = results_df['found_on_attempt'].value_counts().sort_index()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**Emails found by attempt number:**")
+                        for attempt, count in attempt_counts.items():
+                            st.write(f"• Attempt {attempt}: {count} emails")
+                    
+                    with col2:
+                        first_attempt_success = len(results_df[results_df['found_on_attempt'] == 1])
+                        first_attempt_rate = (first_attempt_success / len(results_df) * 100) if len(results_df) > 0 else 0
+                        st.metric("First Attempt Success", f"{first_attempt_rate:.1f}%")
+                        
+                        avg_attempts = results_df['found_on_attempt'].mean()
+                        st.metric("Avg Attempts to Find", f"{avg_attempts:.1f}")
                     
                     # Download button
                     csv_buffer = io.StringIO()
@@ -391,6 +466,7 @@ def render_csv_upload_tab(api_key: str):
                     )
                     
                     st.success(f"🎉 Successfully found {len(verified_emails)} valid email addresses!")
+                    st.info(f"💡 **Efficiency:** Used {total_api_calls} API calls total (avg {avg_calls:.1f} per person). Algorithm stopped early {sum(1 for result in verified_emails if result['found_on_attempt'] < result['total_formats_tested'])} times when valid emails were found.")
                 else:
                     st.warning("⚠️ No valid email addresses were found for the provided data.")
                     
@@ -398,13 +474,11 @@ def render_csv_upload_tab(api_key: str):
             st.error(f"❌ Error processing file: {str(e)}")
 
 def render_single_entry_tab(api_key: str):
-    """Renders the single entry verification tab content."""
+    """Renders the single entry verification tab content with improved algorithm."""
     st.subheader("👤 Single Email Verification")
     
     # Create a form container
     with st.container():
-        # st.markdown('<div class="single-entry-form">', unsafe_allow_html=True)
-        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -426,8 +500,6 @@ def render_single_entry_tab(api_key: str):
             placeholder="e.g., https://company.com or company.com",
             help="Enter the company website URL"
         )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
         
         # Verify button
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -458,7 +530,7 @@ def render_single_entry_tab(api_key: str):
         # Display results
         st.subheader("🎯 Verification Results")
         
-        if result:
+        if result and result.get('email'):
             # Email found
             st.markdown(f"""
             <div class="email-found">
@@ -475,17 +547,32 @@ def render_single_entry_tab(api_key: str):
                 <p><strong>🏢 Company:</strong> {result['company']}</p>
                 <p><strong>📧 Email:</strong> {result['email']}</p>
                 <p><strong>✅ Status:</strong> {result['status'].title()}</p>
+                <p><strong>⚡ Found on attempt:</strong> {result.get('found_on_attempt', 'N/A')} of {result.get('total_formats_available', 'N/A')}</p>
             </div>
             """, unsafe_allow_html=True)
             
-            # Show tested formats
-            with st.expander("🔍 View All Tested Email Formats"):
-                tested_formats = result.get('all_formats_tested', [])
+            # Efficiency metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("API Calls Used", result.get('found_on_attempt', 'N/A'))
+            with col2:
+                st.metric("Total Formats Available", result.get('total_formats_available', 'N/A'))
+            with col3:
+                efficiency = ((result.get('total_formats_available', 1) - result.get('found_on_attempt', 1)) / result.get('total_formats_available', 1)) * 100
+                st.metric("API Calls Saved", f"{efficiency:.0f}%")
+            
+            # Show tested formats (only the ones actually tested)
+            with st.expander("🔍 View Tested Email Formats"):
+                tested_formats = result.get('formats_tested', [])
                 for i, email_format in enumerate(tested_formats, 1):
                     if email_format == result['email']:
-                        st.success(f"{i}. {email_format} ✅ (Valid)")
+                        st.success(f"{i}. {email_format} ✅ (Valid - Search stopped here)")
                     else:
-                        st.text(f"{i}. {email_format}")
+                        st.text(f"{i}. {email_format} ❌")
+                
+                untested_count = result.get('total_formats_available', 0) - len(tested_formats)
+                if untested_count > 0:
+                    st.info(f"💡 **Efficiency gain:** {untested_count} additional formats were not tested because a valid email was found early!")
             
             # Download single result
             single_result_df = pd.DataFrame([{
@@ -493,7 +580,9 @@ def render_single_entry_tab(api_key: str):
                 'lastname': result['lastname'], 
                 'company': result['company'],
                 'email': result['email'],
-                'status': result['status']
+                'status': result['status'],
+                'found_on_attempt': result.get('found_on_attempt'),
+                'api_calls_saved': result.get('total_formats_available', 0) - result.get('found_on_attempt', 0)
             }])
             
             csv_buffer = io.StringIO()
@@ -517,24 +606,17 @@ def render_single_entry_tab(api_key: str):
             </div>
             """, unsafe_allow_html=True)
             
-            # Show what was tested
-            domain = clean_domain(company_url_clean)
-            if domain:
-                full_name = f"{firstname_clean} {lastname_clean}"
-                first, middle, last = parse_name(full_name)
-                
-                if first and last:
-                    tested_formats = generate_email_formats(first, middle, last, domain)
-                    
-                    with st.expander("🔍 View All Tested Email Formats"):
-                        st.info(f"Tested {len(tested_formats)} different email formats:")
-                        for i, email_format in enumerate(tested_formats, 1):
-                            st.text(f"{i}. {email_format}")
+            if result:
+                # Show what was tested
+                with st.expander("🔍 View All Tested Email Formats"):
+                    tested_formats = result.get('formats_tested', [])
+                    st.info(f"Tested {len(tested_formats)} different email formats:")
+                    for i, email_format in enumerate(tested_formats, 1):
+                        st.text(f"{i}. {email_format} ❌")
                     
                     st.info("💡 **Tip:** The email might not exist, or the person might use a different email format not covered by our algorithm.")
             else:
                 st.error("❌ Invalid company URL provided. Please check the URL format.")
-
 
 # Add these imports at the top of your app.py file
 from urllib.parse import quote_plus, urljoin
